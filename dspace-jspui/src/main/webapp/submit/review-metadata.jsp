@@ -31,7 +31,7 @@
 <%@ page import="org.dspace.content.Collection" %>
 <%@ page import="org.dspace.content.DCDate" %>
 <%@ page import="org.dspace.content.DCLanguage" %>
-<%@ page import="org.dspace.content.DCValue" %>
+<%@ page import="org.dspace.content.Metadatum" %>
 <%@ page import="org.dspace.content.Item" %>
 <%@ page import="org.dspace.core.Context" %>
 <%@ page import="org.dspace.core.Utils" %>
@@ -113,14 +113,14 @@
           String inputType = inputs[z].getInputType();
           String pairsName = inputs[z].getPairsType();
           String value;
-          DCValue[] values;
+          Metadatum[] values;
           StringBuffer row = new StringBuffer();
           
-          row.append("<tr>");
-          row.append("<td width=\"40%\" class=\"metadataFieldLabel\">");
+          row.append("<div class=\"row\">");
+          row.append("<span class=\"metadataFieldLabel col-md-4 \">");
           row.append(inputs[z].getLabel());
-          row.append("</td>");
-          row.append("<td width=\"60%\" class=\"metadataFieldValue\">");
+          row.append("</span>");
+          row.append("<span class=\"metadataFieldValue col-md-8\">");
 
           if (inputType.equals("qualdrop_value"))
           {
@@ -200,8 +200,8 @@
                 }
              }
           }
-          row.append("</td>");
-          row.append("</tr>");
+          row.append("</span>");
+          row.append("</div>");
    
           out.write(row.toString());
        }
@@ -212,18 +212,13 @@
 <%--             DESCRIBE ITEM ELEMENTS                     --%>
 <%-- ====================================================== --%>
             
-<%@page import="org.dspace.workflow.WorkflowItem"%><table width="100%">
-               <tr>
-                   <td width="100%">
-                   <table width="700px">
+<%@page import="org.dspace.workflow.WorkflowItem"%>
+<div class="col-md-10">
 
 <%
             layoutSection(request, out, inputSet, subInfo, item, pageNum, pageContext);
 %>
-                                        </table>
-                                    </td>
-                                    <td valign="middle">
-                                         <input type="submit" name="submit_jump_<%=stepJump%>" value="<fmt:message key="jsp.submit.review.button.correct"/>" />
-                                    </td>
-                                </tr>
-                        </table>
+</div>
+<div class="col-md-2">
+     <input class="btn btn-default" type="submit" name="submit_jump_<%=stepJump%>" value="<fmt:message key="jsp.submit.review.button.correct"/>" />
+</div>

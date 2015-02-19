@@ -41,17 +41,26 @@
 
 	//get submission information object
     SubmissionInfo subInfo = SubmissionController.getSubmissionInfo(context, request);
+    request.setAttribute("submission.info", subInfo);
 
     boolean withEmbargo = ((Boolean)request.getAttribute("with_embargo")).booleanValue();
 
- 	// Determine whether a file is REQUIRED to be uploaded (default to true)
- 	boolean fileRequired = ConfigurationManager.getBooleanProperty("webui.submit.upload.required", true);
+    // Determine whether a file is REQUIRED to be uploaded (default to true)
+    boolean fileRequired = ConfigurationManager.getBooleanProperty("webui.submit.upload.required", true);
     boolean ajaxProgress = ConfigurationManager.getBooleanProperty("webui.submit.upload.ajax", true);
+    boolean html5Upload = ConfigurationManager.getBooleanProperty("webui.submit.upload.html5", true);
 
  	Boolean sherpa = (Boolean) request.getAttribute("sherpa");
     boolean bSherpa = sherpa != null?sherpa:false;
 
+<<<<<<< HEAD
+ 	Boolean sherpa = (Boolean) request.getAttribute("sherpa");
+    boolean bSherpa = sherpa != null?sherpa:false;
+
     if (ajaxProgress || bSherpa)
+=======
+    if (ajaxProgress || bSherpa || html5Upload)
+>>>>>>> 2eaaf84810b3a3de0907e3e37ab695b053cc381f
     {
 %>
 <c:set var="dspace.layout.head.last" scope="request">
@@ -75,15 +84,18 @@
 	<!-- CSS adjustments for browsers with JavaScript disabled -->
 	<noscript><link rel="stylesheet" href="<%= request.getContextPath() %>/static/css/jquery.fileupload-ui-noscript.css"></noscript>
     <script type="text/javascript">
-    function initProgressBar($){
+		var bootstrapButton = $.fn.button.noConflict(); // return $.fn.button to previously assigned value
+		$.fn.bootstrapBtn = bootstrapButton;            // give $().bootstrapBtn the Bootstrap functionality
+
+	function initProgressBar($){
     	var progressbarArea = $("#progressBarArea");
 		progressbarArea.show();
     }
     
     function updateProgressBar($, data){
     	$('#uploadForm').find('input').attr('disabled','disabled');
-    	$('#spanFile').button("disable")
-    	$('#spanFileCancel').button("disable")
+    	$('#spanFile').attr('disabled','disabled');
+    	$('#spanFileCancel').attr('disabled','disabled');
     	var percent = parseInt(data.loaded / data.total * 100, 10);
 		var progressbarArea = $("#progressBarArea");
 		var progressbar = $("#progressBar");
@@ -124,18 +136,18 @@
 			$('#selectedFile').html($('#tfile').val().replace(/.*(\/|\\)/, '')).append('&nbsp;');
 		}
 		else {
-			$('<p id="selectedFile">'+$('#tfile').val().replace(/.*(\/|\\)/, '')+'</p>').insertAfter($('#spanFile')).append('&nbsp;');
-			var span = $('<span id="spanFileCancel"><fmt:message key="jsp.submit.choose-file.upload-ajax.button.cancel"/></span>');
+			$('<span id="selectedFile">&nbsp;'+$('#tfile').val().replace(/.*(\/|\\)/, '')+'</span>').insertAfter($('#spanFile')).append('&nbsp;');
+			var span = $('<span id="spanFileCancel" class="btn btn-danger"><span class="glyphicon glyphicon-ban-circle"></span></span>');
 			span.appendTo($('#selectedFile'));
-    		span.button({icons: {primary: "ui-icon ui-icon-cancel"}})
-    			.click(function(e){
+    		span.click(function(e){
     				var parent = $('#spanFile').parent();
     				$('#spanFile').remove();
     				$('#selectedFile').remove();
     				$('<input type="file" name="file" id="tfile">').appendTo(parent);
-    				$('#tfile').wrap('<span id="spanFile" class="fileinput-button"><fmt:message key="jsp.submit.choose-file.upload-ajax.button.select-file"/></span>');
-    		    	$('#spanFile').button({icons: {primary: "ui-icon ui-icon-folder-open"}});
-    		    	$('#tfile').on('change', function(){
+                    $('#tfile').wrap('<span id="spanFile" class="fileinput-button btn btn-success col-md-2"></span>');
+                    $('#spanFile').prepend('&nbsp;&nbsp;<fmt:message key="jsp.submit.choose-file.upload-ajax.button.select-file"/>');
+                    $('#spanFile').prepend('<span class="glyphicon glyphicon-folder-open"></span>');
+                   	$('#tfile').on('change', function(){
     		    		 decorateFileInputChangeEvent($);
     		    	});
     		});
@@ -150,11 +162,14 @@
    		progressbarArea.find('p.progressBarProgressMsg').hide();
    		progressbarArea.find('p.progressBarCompleteMsg').hide();
    		progressbarArea.hide();
-    	$('#tfile').wrap('<span id="spanFile" class="fileinput-button"><fmt:message key="jsp.submit.choose-file.upload-ajax.button.select-file"/></span>');
-    	$('#spanFile').button({icons: {primary: "ui-icon ui-icon-folder-open"}});
-    	$('#tfile').on('change', function(){
-    		 decorateFileInputChangeEvent($);
-   		});
+
+        $('#tfile').wrap('<span id="spanFile" class="fileinput-button btn btn-success col-md-2"></span>');
+        $('#spanFile').prepend('&nbsp;&nbsp;<fmt:message key="jsp.submit.choose-file.upload-ajax.button.select-file"/>');
+        $('#spanFile').prepend('<span class="glyphicon glyphicon-folder-open"></span>');
+        $('#tfile').on('change', function(){
+            decorateFileInputChangeEvent($);
+        });
+
    		// the skip button should not send any files
    		$('input[name="<%=UploadStep.SUBMIT_SKIP_BUTTON%>"]').on('click', function(){
    			$('#tfile').val('');
@@ -163,12 +178,16 @@
    		// track the upload progress for all the submit buttons other than the skip
    		$('input[type="submit"]').not(":disabled")
    		.on('click', function(e){   			
-   			$('#uploadForm').attr('target','uploadFormIFrame');
    			if ($('#tfile').val() != null && $('#tfile').val() != '') {
-	   			initProgressBar($);
+   				$('#uploadForm').attr('target','uploadFormIFrame');
+   	   			initProgressBar($);
 	   			setTimeout(function() {
 					monitorProgressJSON($);					
 				}, 100);
+   			}
+   			else
+  			{
+				$('#ajaxUpload').val(false);
    			}
    			$('#uploadFormIFrame').on('load',function(){
    				var resultFile = null;
@@ -182,15 +201,20 @@
    					}
 	   				resultFile = jsonResult.files[0];
    				} catch (err) {
+   					// a file has been upload, the answer is html isntead of json because 
+   					// come from a different step. Just ignore the target step and reload 
+   					// the upload list screen. We need to let the user known that the file 
+   					// has been uploaded
    					resultFile = new Object();
 	   				resultFile.status = null;
    				}
    				
-   	    		if (resultFile.status == <%= UploadStep.STATUS_COMPLETE %> || 
+   	    		if (resultFile.status == null || resultFile.status == <%= UploadStep.STATUS_COMPLETE %> || 
    	    				resultFile.status == <%= UploadStep.STATUS_UNKNOWN_FORMAT %>)
    	    		{
    	    			completeProgressBar($, resultFile.size);
-   		           	if (resultFile.status == <%= UploadStep.STATUS_COMPLETE %>)
+   		           	if (resultFile.status == null || 
+   		           			resultFile.status == <%= UploadStep.STATUS_COMPLETE %>)
    	           		{
    		           		$('#uploadFormPostAjax').removeAttr('enctype')
    		           			.append('<input type="hidden" name="<%= UploadStep.SUBMIT_UPLOAD_BUTTON %>" value="1">');
@@ -274,11 +298,23 @@
 		}});
 	});
     </script>
+<<<<<<< HEAD
+=======
+    <% }
+    if (html5Upload) {%>
+      <link rel="stylesheet" href="<%=request.getContextPath()%>/static/css/resumable-upload.css" type="text/css" />
+      <script src="<%=request.getContextPath()%>/static/js/resumable.js"></script>
+>>>>>>> 2eaaf84810b3a3de0907e3e37ab695b053cc381f
     <% } %>
 </c:set>
 <%  } %>
 
+<<<<<<< HEAD
 <dspace:layout locbar="off"
+=======
+<dspace:layout style="submission"
+			   locbar="off"
+>>>>>>> 2eaaf84810b3a3de0907e3e37ab695b053cc381f
                navbar="off"
                titlekey="jsp.submit.choose-file.title"
                nocache="true">
@@ -307,7 +343,11 @@
     </form>
     <iframe id="uploadFormIFrame" name="uploadFormIFrame" style="display: none"> </iframe>
 <% } %>
+<<<<<<< HEAD
     <form id="uploadForm" <%= bSherpa?"class=\"sherpa\"":"" %> method="post" 
+=======
+    <form id="uploadForm" <%= bSherpa?"class=\"sherpa col-md-8\"":"" %> method="post" 
+>>>>>>> 2eaaf84810b3a3de0907e3e37ab695b053cc381f
     	action="<%= request.getContextPath() %>/submit" enctype="multipart/form-data" 
     	onkeydown="return disableEnterKey(event);">
 
@@ -317,16 +357,17 @@
         <%= SubmissionController.getSubmissionParameters(context, request) %>
 
         <%-- <h1>Submit: Upload a File</h1> --%>
-		<h1><fmt:message key="jsp.submit.choose-file.heading"/></h1>
+		<h1><fmt:message key="jsp.submit.choose-file.heading"/>
+			<dspace:popup page="<%= LocaleSupport.getLocalizedMessage(pageContext, \"help.index\") + \"#upload\"%>"><fmt:message key="jsp.morehelp"/></dspace:popup>
+		</h1>
     
         <%-- <p>Please enter the name of
         <%= (si.submission.hasMultipleFiles() ? "one of the files" : "the file" ) %> on your
         local hard drive corresponding to your item.  If you click "Browse...", a
         new window will appear in which you can locate and select the file on your
-        local hard drive. <object><dspace:popup page="/help/index.html#upload">(More Help...)</dspace:popup></object></p> --%>
+        local hard drive.</p> --%>
 
-		<p><fmt:message key="jsp.submit.choose-file.info1"/>
-			<dspace:popup page="<%= LocaleSupport.getLocalizedMessage(pageContext, \"help.index\") + \"#upload\"%>"><fmt:message key="jsp.morehelp"/></dspace:popup></p>
+		<p><fmt:message key="jsp.submit.choose-file.info1"/></p>
         
         <%-- FIXME: Collection-specific stuff should go here? --%>
         <%-- <p class="submitFormHelp">Please also note that the DSpace system is
@@ -338,11 +379,140 @@
 		<div class="submitFormHelp"><fmt:message key="jsp.submit.choose-file.info6"/>
         <dspace:popup page="<%= LocaleSupport.getLocalizedMessage(pageContext, \"help.formats\")%>"><fmt:message key="jsp.submit.choose-file.info7"/></dspace:popup>
         </div>
+		<br/>
+	   <div class="row container">
+    		<div class="row">
+                    <%-- Document File: --%>
+                    <div id="simple-upload">
+                        <label class="col-md-<%= bSherpa?"3":"2" %>" for="tfile"><fmt:message key="jsp.submit.choose-file.document"/></label>
+                        <input type="file" size="40" name="file" id="tfile" />
+                    </div>
+            </div><br/>
+            
+            
+<%if (html5Upload) {%>
+      <div class="resumable-error">
+          <fmt:message key="jsp.submit.choose-file.upload-resumable.unsupported"/>
+      </div>
+      <div id="resumable-upload">
+          <div class="resumable-drop col-md-12" ondragenter="jQuery(this).addClass('resumable-dragover');" ondragend="jQuery(this).removeClass('resumable-dragover');" ondrop="jQuery(this).removeClass('resumable-dragover');">
+              <span class="glyphicon glyphicon-upload"></span>
+              <a class="resumable-browse"><fmt:message key="jsp.submit.choose-file.upload-resumable.button.select-file"/></a>         	
+          </div>
+      </div>
+            
+      <div class="resumable-progress">
+        <table>
+          <tr>
+            <td width="100%"><div class="progress-container"><div class="progress-bar"></div></div></td>
+            <td class="progress-text" nowrap="nowrap"></td>
+            <td class="progress-pause" nowrap="nowrap">
+              <a href="#" onclick="resume(); return(false);" class="progress-resume-link"><img src="image/submit/resume.png" title="Resume upload" /></a>
+              <a href="#" onclick="r.pause(); return(false);" class="progress-pause-link"><img src="image/submit/pause.png" title="Pause upload" /></a>
+            </td>
+          </tr>
+        </table>
+      </div>
+      
+      <div class="resumable-files">
+          <div class="panel panel-default">
+              <div class="panel-heading">
+                  Files To Upload
+              </div>
 
+              <table class="table resumable-list">
+                  <thead>
+                      <th>#</th>
+                      <th>Name</th>
+                      <th>Status</th>
+                  </thead>
+                  <tbody></tbody>
+              </table>
+          </div>
+      </div>
+      
+      <script>
+        var r = new Resumable({
+            target:'submit',
+            chunkSize:1024*1024,
+            simultaneousUploads:1,
+            testChunks: true,
+            throttleProgressCallbacks:1,
+            method: "multipart",
+            query:{workspace_item_id:'<%= subInfo.getSubmissionItem().getID()%>'}
+          });
+        // Resumable.js isn't supported, fall back on a different method
+
+        if(r.support) {
+          // Show a place for dropping/selecting files
+          $('.resumable-error').hide();
+          $('#simple-upload').hide();
+          $('.resumable-drop').show();
+          $('#resumable-upload').show(); // done
+          r.assignDrop($('.resumable-drop')[0]);
+          r.assignBrowse($('.resumable-browse')[0]);
+
+          // Handle file add event
+          r.on('fileAdded', function(file){
+              // Show progress pabr
+              $('.resumable-progress, .resumable-files, .resumable-list').show();
+              // Show pause, hide resume
+              $('.resumable-progress .progress-resume-link').hide();
+              $('.resumable-progress .progress-pause-link').show();
+              // Add the file to the list
+              $('.resumable-list tbody')
+                    .append('<tr>')
+                    .append('<td class="resumable-file-'+file.uniqueIdentifier+'">Uploading</td>')
+                    .append('<td class="resumable-file-name"></td>')
+                    //.append('<td class="resumable-file-description"><input type="text" name="description[]" id="tdescription"/></td>')            
+                    .append('<td class="resumable-file-progress"></td>')
+                    .append('</tr>');
+              $('.resumable-file-'+file.uniqueIdentifier+' + .resumable-file-name').html(file.fileName);
+              // Actually start the upload
+              r.upload();
+            });
+          r.on('pause', function(){
+              // Show resume, hide pause
+              $('.resumable-progress .progress-resume-link').show();
+              $('.resumable-progress .progress-pause-link').hide();
+            });
+          r.on('complete', function(){
+              // Hide pause/resume when the upload has completed
+              $('.resumable-progress .progress-resume-link, .resumable-progress .progress-pause-link').hide();
+            });
+          r.on('fileSuccess', function(file,message){
+              // Reflect that the file upload has completed
+              $('.resumable-file-'+file.uniqueIdentifier).html('');
+              //$('.resumable-file-'+file.uniqueIdentifier+' + .resumable-file-name + .resumable-file-description + .resumable-file-progress').html('<span class="glyphicon glyphicon-ok-sign"></span>');
+              $('.resumable-file-'+file.uniqueIdentifier+' + .resumable-file-name + .resumable-file-progress').html('<span class="glyphicon glyphicon-ok-sign"></span>');
+            });
+          r.on('fileError', function(file, message){
+              // Reflect that the file upload has resulted in error
+              $('.resumable-file-'+file.uniqueIdentifier+' + .resumable-file-name + .resumable-file-progress').html('<span class="glyphicon glyphicon-exclamation-sign"></span>');              
+              //'+message+')');
+              r.removeFile(file);
+              r.upload();
+            });
+          r.on('fileProgress', function(file){
+              // Handle progress for both the file and the overall upload
+              $('.resumable-file-'+file.uniqueIdentifier+' + .resumable-file-name + .resumable-file-progress').html(Math.floor(file.progress()*100) + '%');
+              $('.progress-bar').css({width:Math.floor(r.progress()*100) + '%'});
+            });
+            
+          function resume() {
+              // Show pause, hide resume
+              $('.resumable-progress .progress-resume-link').hide();
+              $('.resumable-progress .progress-pause-link').show();
+              r.upload();
+          }
+        }
+      </script>
+<%}%>
+            
 <% if (ajaxProgress)
 {
 %>
-       <div id="progressBarArea" style="display: none;  width: 50%; float: right;">
+       <div id="progressBarArea" class="row">
                <div id="progressBar"></div>
                <p class="progressBarInitMsg">
                			<fmt:message key="jsp.submit.choose-file.upload-ajax.uploadInit"/>
@@ -357,42 +527,24 @@
                        <fmt:message key="jsp.submit.choose-file.upload-ajax.uploadCompleted">
                                <fmt:param><span class="bytesTotal">&nbsp;</span></fmt:param>
                        </fmt:message></p>
-       </div>
+       </div><br/>
 <% } %>
-    
-        <table border="0" align="center">
-            <tr>
-                <td class="submitFormLabel">
-                    <%-- Document File: --%>
-					<label for="tfile"><fmt:message key="jsp.submit.choose-file.document"/></label>
-                </td>
-                <td>
-                    <input type="file" size="40" name="file" id="tfile" />
-                </td>
-            </tr>
+
 <%
     if (subInfo.getSubmissionItem().hasMultipleFiles())
     {
 %>
-            <tr>
-                <td colspan="2">&nbsp;</td>
-            </tr>
-            <tr>
-                <td class="submitFormHelp" colspan="2">
                     <%-- Please give a brief description of the contents of this file, for
                     example "Main article", or "Experiment data readings." --%>
-					<fmt:message key="jsp.submit.choose-file.info9"/>
-                </td>
-            </tr>
-            <tr>
+					<div class="help-block"><fmt:message key="jsp.submit.choose-file.info9"/></div>
                 <%-- <td class="submitFormLabel">File Description:</td> --%>
-				<td class="submitFormLabel"><label for="tdescription"><fmt:message key="jsp.submit.choose-file.filedescr"/></label></td>
-                <td><input type="text" name="description" id="tdescription" size="40"/></td>
-            </tr>
+                <div class="row">
+					<label for="tdescription" class="col-md-<%= bSherpa?"3":"2" %>"><fmt:message key="jsp.submit.choose-file.filedescr"/></label>
+                	<span class="col-md-<%= bSherpa?"9":"10" %> row"><input class="form-control" type="text" name="description" id="tdescription" size="40"/></span>
+                </div>
 <%
     }
 %>
-        </table>
 
 <%
     if (withEmbargo)
@@ -403,61 +555,67 @@
         <br/>
 <%
     }
-%>
-
+%></div>
+	<br/>
 		<%-- Hidden fields needed for SubmissionController servlet to know which step is next--%>
         <%= SubmissionController.getSubmissionParameters(context, request) %>
-    
-        <p>&nbsp;</p>
-
-        <center>
-            <table border="0" width="80%">
-                <tr>
-                    <td width="100%">&nbsp;</td>
+        <% 
+        	int col = 0; 
+			if(!SubmissionController.isFirstStep(request, subInfo))
+			{
+				col++;
+			}
+			if (!fileRequired || subInfo.getSubmissionItem().getItem().hasUploadedFiles())
+            {
+				col++;
+            }
+        %>
+    	<div class="pull-right btn-group col-md-<%= (bSherpa?2:1) * col*2 + 4 %>">
                	<%  //if not first step, show "Previous" button
 					if(!SubmissionController.isFirstStep(request, subInfo))
 					{ %>
-                    <td>
-                        <input type="submit" name="<%=AbstractProcessingStep.PREVIOUS_BUTTON%>" value="<fmt:message key="jsp.submit.general.previous"/>" />
-                    </td>
+                        <input class="btn btn-default col-md-<%= 12 / (col + 2) %>" type="submit" name="<%=AbstractProcessingStep.PREVIOUS_BUTTON%>" value="<fmt:message key="jsp.submit.general.previous"/>" />
 				<%  } %>
-                    <td>
-                        <input type="submit" name="<%=UploadStep.SUBMIT_UPLOAD_BUTTON%>" value="<fmt:message key="jsp.submit.general.next"/>" />
-                    </td> 
+                        <input class="btn btn-default col-md-<%= 12 / (col + 2) %>" type="submit" name="<%=AbstractProcessingStep.CANCEL_BUTTON%>" value="<fmt:message key="jsp.submit.general.cancel-or-save.button"/>" />
                     <%
                         //if upload is set to optional, or user returned to this page after pressing "Add Another File" button
                     	if (!fileRequired || subInfo.getSubmissionItem().getItem().hasUploadedFiles())
                         {
                     %>
-                        	<td>
-                                <input type="submit" name="<%=UploadStep.SUBMIT_SKIP_BUTTON%>" value="<fmt:message key="jsp.submit.choose-file.skip"/>" />
-                            </td>
+                                <input class="btn btn-warning col-md-<%= 12 / (col + 2) %>" type="submit" name="<%=UploadStep.SUBMIT_SKIP_BUTTON%>" value="<fmt:message key="jsp.submit.choose-file.skip"/>" />
                     <%
                         }
                     %>   
-                              
-                    <td>&nbsp;&nbsp;&nbsp;</td>
-                    <td align="right">
-                        <input type="submit" name="<%=AbstractProcessingStep.CANCEL_BUTTON%>" value="<fmt:message key="jsp.submit.general.cancel-or-save.button"/>" />
-                    </td>
-                </tr>
-            </table>
-        </center>  
+                        <input class="btn btn-primary col-md-<%= 12 / (col + 2) %>" type="submit" name="<%=UploadStep.SUBMIT_UPLOAD_BUTTON%>" value="<fmt:message key="jsp.submit.general.next"/>" />
+        </div>                
     </form>
 <%
   if (bSherpa)
       {
 %>
+<<<<<<< HEAD
   <div id="sherpaBox" class="ui-dialog ui-widget ui-widget-content ui-corner-all ui-front">
   	  <div class="ui-dialog-titlebar ui-widget-header ui-corner-all ui-helper-clearfix">
   		  <span id="ui-id-1" class="ui-dialog-title"><fmt:message key="jsp.sherpa.title" /></span>
   	  </div>
 	  <div id="sherpaContent" class="ui-dialog-content ui-widget-content">
+=======
+<div class="col-md-4">
+  <div id="sherpaBox" class="panel panel-info">
+  	  <div class="panel-heading">
+  		  <span id="ui-id-1"><fmt:message key="jsp.sherpa.title" /></span>
+  	  </div>
+	  <div id="sherpaContent" class="panel-body">
+>>>>>>> 2eaaf84810b3a3de0907e3e37ab695b053cc381f
 	  <fmt:message key="jsp.sherpa.loading">
 			<fmt:param value="<%=request.getContextPath()%>" />
 	  </fmt:message>  
 	  </div>
   </div>
+<<<<<<< HEAD
+=======
+</div>
+>>>>>>> 2eaaf84810b3a3de0907e3e37ab695b053cc381f
 <%
     }
 %>

@@ -116,6 +116,7 @@ public class BrowseDAOPostgres implements BrowseDAO
     /** flags for what the items represent */
     private boolean itemsInArchive = true;
     private boolean itemsWithdrawn = false;
+    private boolean itemsDiscoverable = true;
 
     private boolean enableBrowseFrequencies = true;
     
@@ -367,7 +368,8 @@ public class BrowseDAOPostgres implements BrowseDAO
                 TableRow row = tri.next();
                 BrowseItem browseItem = new BrowseItem(context, row.getIntColumn("item_id"),
                                                   itemsInArchive,
-                                                  itemsWithdrawn);
+                                                  itemsWithdrawn,
+                                                  itemsDiscoverable);
                 results.add(browseItem);
             }
 
@@ -687,12 +689,21 @@ public class BrowseDAOPostgres implements BrowseDAO
         {
             itemsInArchive = false;
             itemsWithdrawn = true;
+            itemsDiscoverable = true;
         }
-        else
+        else if (table.equals(BrowseIndex.getPrivateBrowseIndex().getTableName()))
+        {
+        	itemsInArchive = true;
+            itemsWithdrawn = false;
+        	itemsDiscoverable = false;
+        }
+        else 
         {
             itemsInArchive = true;
             itemsWithdrawn = false;
+            itemsDiscoverable = true;
         }
+
 
         this.rebuildQuery = true;
     }
@@ -783,8 +794,19 @@ public class BrowseDAOPostgres implements BrowseDAO
 
         //If we want frequencies and this is not a count query, enchance the query accordingly
         if (isEnableBrowseFrequencies() && countValues==null){
-            String before = "SELECT count(*) AS num, dvalues.value, dvalues.authority FROM (";
-            String after = ") dvalues , "+tableMap+" WHERE dvalues.id = "+tableMap+".distinct_id GROUP BY "+tableMap+
+            String before = "SELECT count(*) AS num, dvalues.value, dvalues.authority FROM ";
+            if(containerTable != null && containerIDField != null && containerID != -1)
+            {
+                before += containerTable + ",";
+            }
+            before += " (";
+            String after = ") dvalues , "+tableMap+" WHERE dvalues.id = "+tableMap+".distinct_id ";
+            if(containerTable != null && containerIDField != null && containerID != -1)
+            {
+                after +=  " AND " + tableMap + ".item_id=" + containerTable +".item_id AND " + containerTable +  "." + containerIDField + "=?";
+                params.add(containerID);
+            }
+            after += " GROUP BY "+tableMap+
                     ".distinct_id, dvalues.value, dvalues.authority, dvalues.sort_value";
 
             queryBuf.insert(0, before);

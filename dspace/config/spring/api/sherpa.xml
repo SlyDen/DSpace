@@ -30,7 +30,11 @@
 						</list>
 					</property>
 				</bean>
+<<<<<<< HEAD
 				<!-- Use the follow if you have the SHERPARoMEOJournalTitle enabled
+=======
+				<!-- Uncomment this bean if you have SHERPARoMEOJournalTitle enabled
+>>>>>>> 2eaaf84810b3a3de0907e3e37ab695b053cc381f
 				<bean class="org.dspace.app.sherpa.submit.MetadataAuthorityISSNExtractor">
 					<property name="metadataList">
 						<list>

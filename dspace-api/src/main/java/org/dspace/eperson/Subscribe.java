@@ -32,9 +32,11 @@ import org.dspace.authorize.AuthorizeException;
 import org.dspace.authorize.AuthorizeManager;
 import org.dspace.content.Collection;
 import org.dspace.content.DCDate;
-import org.dspace.content.DCValue;
+import org.dspace.content.Metadatum;
 import org.dspace.content.Item;
+import org.dspace.content.Site;
 import org.dspace.core.ConfigurationManager;
+import org.dspace.core.Constants;
 import org.dspace.core.Context;
 import org.dspace.core.Email;
 import org.dspace.core.I18nUtil;
@@ -199,6 +201,47 @@ public class Subscribe
         Collection[] collArray = new Collection[collections.size()];
 
         return (Collection[]) collections.toArray(collArray);
+    }
+
+    /**
+     * Find out which collections the currently logged in e-person can subscribe to
+     *
+     * @param context
+     *            DSpace context
+     * @param eperson
+     *            EPerson
+     * @return array of collections the currently logged in e-person can subscribe to
+     */
+    public static Collection[] getAvailableSubscriptions(Context context)
+            throws SQLException
+    {
+        return getAvailableSubscriptions(context, null);
+    }
+    
+    /**
+     * Find out which collections an e-person can subscribe to
+     *
+     * @param context
+     *            DSpace context
+     * @param eperson
+     *            EPerson
+     * @return array of collections e-person can subscribe to
+     */
+    public static Collection[] getAvailableSubscriptions(Context context, EPerson eperson)
+            throws SQLException
+    {
+        Collection[] collections;
+        
+        if (eperson != null)
+        {
+            context.setCurrentUser(eperson);
+        }
+        
+        Site site = (Site) Site.find(context, 0);
+        
+        collections = Collection.findAuthorized(context, null, Constants.ADD);
+
+        return collections;
     }
 
     /**
@@ -421,7 +464,7 @@ public class Subscribe
                         HarvestedItemInfo hii = (HarvestedItemInfo) itemInfos
                                 .get(j);
 
-                        DCValue[] titles = hii.item.getDC("title", null, Item.ANY);
+                        Metadatum[] titles = hii.item.getDC("title", null, Item.ANY);
                         emailText.append("      ").append(labels.getString("org.dspace.eperson.Subscribe.title")).append(" ");
 
                         if (titles.length > 0)
@@ -433,7 +476,7 @@ public class Subscribe
                             emailText.append(labels.getString("org.dspace.eperson.Subscribe.untitled"));
                         }
 
-                        DCValue[] authors = hii.item.getDC("contributor", Item.ANY,
+                        Metadatum[] authors = hii.item.getDC("contributor", Item.ANY,
                                 Item.ANY);
 
                         if (authors.length > 0)
@@ -578,12 +621,12 @@ public class Subscribe
             // has the item modified today?
             if (lastUpdateStr.equals(today))
             {
-                DCValue[] dateAccArr = infoObject.item.getMetadata("dc",
+                Metadatum[] dateAccArr = infoObject.item.getMetadata("dc",
                         "date", "accessioned", Item.ANY);
                 // we need only the item archived yesterday
                 if (dateAccArr != null && dateAccArr.length > 0)
                 {
-                    for (DCValue date : dateAccArr)
+                    for (Metadatum date : dateAccArr)
                     {
                         if (date != null && date.value != null)
                         {
@@ -635,11 +678,11 @@ public class Subscribe
 
         for (HarvestedItemInfo infoObject : completeList)
         {
-            DCValue[] dateAccArr = infoObject.item.getMetadata("dc", "date", "accessioned", Item.ANY);
+            Metadatum[] dateAccArr = infoObject.item.getMetadata("dc", "date", "accessioned", Item.ANY);
 
             if (dateAccArr != null && dateAccArr.length > 0)
             {
-                for(DCValue date : dateAccArr)
+                for(Metadatum date : dateAccArr)
                 {
                     if(date != null && date.value != null)
                     {

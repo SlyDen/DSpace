@@ -7,8 +7,15 @@
  */
 package org.dspace.app.bulkedit;
 
+import org.apache.commons.lang3.StringUtils;
+import org.dspace.authority.AuthorityValue;
+import org.dspace.app.bulkedit.DSpaceCSVLine;
+import org.dspace.app.bulkedit.MetadataImport;
+import org.dspace.app.bulkedit.MetadataImportInvalidHeadingException;
+import org.dspace.content.Collection;
 import org.dspace.content.*;
 import org.dspace.content.Collection;
+import org.dspace.content.authority.Choices;
 import org.dspace.core.ConfigurationManager;
 import org.dspace.core.Context;
 
@@ -45,19 +52,19 @@ public class DSpaceCSV implements Serializable
     /** The value separator (defaults to double pipe '||') */
     protected static String valueSeparator;
 
-    /** The value separator in an escaped form for using in regexs */
+    /** The value separator in an escaped form for using in regexes */
     protected static String escapedValueSeparator;
 
     /** The field separator (defaults to comma) */
     protected static String fieldSeparator;
 
-    /** The field separator in an escaped form for using in regexs */
+    /** The field separator in an escaped form for using in regexes */
     protected static String escapedFieldSeparator;
 
-    /** The authority separator (defaults to dobule colon '::') */
+    /** The authority separator (defaults to double colon '::') */
     protected static String authoritySeparator;
 
-    /** The authority separator in an escaped form for using in regexs */
+    /** The authority separator in an escaped form for using in regexes */
     protected static String escapedAuthoritySeparator;
 
 
@@ -129,6 +136,14 @@ public class DSpaceCSV implements Serializable
                 }
                 else if (!"id".equals(element))
                 {
+                    String authorityPrefix = "";
+                    AuthorityValue authorityValueType = MetadataImport.getAuthorityValueType(element);
+                    if (authorityValueType != null) {
+                        String authorityType = authorityValueType.getAuthorityType();
+                        authorityPrefix = element.substring(0, authorityType.length() + 1);
+                        element = element.substring(authorityPrefix.length());
+                    }
+
                     // Verify that the heading is valid in the metadata registry
                     String[] clean = element.split("\\[");
                     String[] parts = clean[0].split("\\.");
@@ -164,7 +179,7 @@ public class DSpaceCSV implements Serializable
                     }
 
                     // Store the heading
-                    headings.add(element);
+                    headings.add(authorityPrefix + element);
                 }
             }
 
@@ -172,7 +187,7 @@ public class DSpaceCSV implements Serializable
             StringBuilder lineBuilder = new StringBuilder();
             String lineRead;
 
-            while ((lineRead = input.readLine()) != null)
+            while (StringUtils.isNotBlank(lineRead = input.readLine()))
             {
                 if (lineBuilder.length() > 0) {
                     // Already have a previously read value - add this line
@@ -385,6 +400,12 @@ public class DSpaceCSV implements Serializable
      */
     public final void addItem(Item i) throws Exception
     {
+        // If the item does not have an "owningCollection" the the below "getHandle()" call will fail
+        // This should not happen but is here for safety.
+        if (i.getOwningCollection() == null) {
+            return;
+        }
+
         // Create the CSV line
         DSpaceCSVLine line = new DSpaceCSVLine(i.getID());
 
@@ -404,8 +425,8 @@ public class DSpaceCSV implements Serializable
         }
 
         // Populate it
-        DCValue md[] = i.getMetadata(Item.ANY, Item.ANY, Item.ANY, Item.ANY);
-        for (DCValue value : md)
+        Metadatum md[] = i.getMetadata(Item.ANY, Item.ANY, Item.ANY, Item.ANY);
+        for (Metadatum value : md)
         {
             // Get the key (schema.element)
             String key = value.schema + "." + value.element;
@@ -430,7 +451,7 @@ public class DSpaceCSV implements Serializable
                 String mdValue = value.value;
                 if (value.authority != null && !"".equals(value.authority))
                 {
-                    mdValue += authoritySeparator + value.authority + authoritySeparator + value.confidence;
+                    mdValue += authoritySeparator + value.authority + authoritySeparator +  (value.confidence != -1 ? value.confidence : Choices.CF_ACCEPTED);
                 }
                 line.add(key, mdValue);
                 if (!headings.contains(key))
@@ -451,7 +472,7 @@ public class DSpaceCSV implements Serializable
      */
     public final void addItem(String line) throws Exception
     {
-        // Check to see if the last character is a field separator, which hides the last empy column
+        // Check to see if the last character is a field separator, which hides the last empty column
         boolean last = false;
         if (line.endsWith(fieldSeparator))
         {
@@ -591,8 +612,9 @@ public class DSpaceCSV implements Serializable
         // Create the headings line
         String[] csvLines = new String[counter + 1];
         csvLines[0] = "id" + fieldSeparator + "collection";
-        Collections.sort(headings);
-        for (String value : headings)
+        List<String> headingsCopy = new ArrayList<String>(headings);
+        Collections.sort(headingsCopy);
+        for (String value : headingsCopy)
         {
             csvLines[0] = csvLines[0] + fieldSeparator + value;
         }
@@ -601,7 +623,7 @@ public class DSpaceCSV implements Serializable
         int c = 1;
         while (i.hasNext())
         {
-            csvLines[c++] = i.next().toCSV(headings);
+            csvLines[c++] = i.next().toCSV(headingsCopy);
         }
 
         return csvLines;
@@ -633,10 +655,10 @@ public class DSpaceCSV implements Serializable
      *
      * The list can be configured via the key ignore-on-export in bulkedit.cfg
      *
-     * @param md The DCValue to examine
+     * @param md The Metadatum to examine
      * @return Whether or not it is OK to export this element
      */
-    private final boolean okToExport(DCValue md)
+    private final boolean okToExport(Metadatum md)
     {
         // Now compare with the list to ignore
         String key = md.schema + "." + md.element;

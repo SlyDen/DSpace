@@ -10,7 +10,7 @@ package org.dspace.sword2;
 import org.dspace.authorize.AuthorizeException;
 import org.dspace.content.Collection;
 import org.dspace.content.DCDate;
-import org.dspace.content.DCValue;
+import org.dspace.content.Metadatum;
 import org.dspace.content.DSpaceObject;
 import org.dspace.content.Item;
 import org.dspace.content.WorkspaceItem;
@@ -24,31 +24,18 @@ import org.swordapp.server.SwordServerException;
 
 import java.io.IOException;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 
-public class SimpleDCEntryIngester implements SwordEntryIngester
+public class SimpleDCEntryIngester extends AbstractSimpleDC implements SwordEntryIngester
 {
-    private Map<String, String> dcMap;
-
 	public SimpleDCEntryIngester()
     {
-        // we should load our DC map from configuration
-        this.dcMap = new HashMap<String, String>();
-        Properties props = ConfigurationManager.getProperties("swordv2-server");
-        for (Object key : props.keySet())
-        {
-            String keyString = (String) key;
-            if (keyString.startsWith("simpledc."))
-            {
-                String k = keyString.substring("simpledc.".length());
-                String v = (String) props.get(key);
-                this.dcMap.put(k, v);
-            }
-        }
+        this.loadMetadataMaps();
     }
 
 	public DepositResult ingest(Context context, Deposit deposit, DSpaceObject dso, VerboseDescription verboseDescription)
@@ -82,9 +69,11 @@ public class SimpleDCEntryIngester implements SwordEntryIngester
 			}
 			result.setItem(item);
 
-			// NOTE: this implementation does not remove pre-existing metadata, as that is actually
-			// rather hard to handle in DSpace (what do you do about provenance and other administrator
-			// added metadata?).  Instead "replace" does nothing different to "create new" or "add".
+			// clean out any existing item metadata which is allowed to be replaced
+            if (replace)
+            {
+                this.removeMetadata(item);
+            }
 
 			// add the metadata to the item
 			this.addMetadataToItem(deposit, item);
@@ -119,6 +108,47 @@ public class SimpleDCEntryIngester implements SwordEntryIngester
 		}
 	}
 
+    private void removeMetadata(Item item)
+            throws DSpaceSwordException
+    {
+        String raw = ConfigurationManager.getProperty("swordv2-server", "metadata.replaceable");
+        String[] parts = raw.split(",");
+        for (String part : parts)
+        {
+            Metadatum dcv = this.makeDCValue(part.trim(), null);
+            item.clearMetadata(dcv.schema, dcv.element, dcv.qualifier, Item.ANY);
+        }
+    }
+
+    private void addUniqueMetadata(Metadatum dcv, Item item)
+    {
+        String qual = dcv.qualifier;
+        if (dcv.qualifier == null)
+        {
+            qual = Item.ANY;
+        }
+
+        String lang = dcv.language;
+        if (dcv.language == null)
+        {
+            lang = Item.ANY;
+        }
+        Metadatum[] existing = item.getMetadata(dcv.schema, dcv.element, qual, lang);
+        for (Metadatum dcValue : existing)
+        {
+            // FIXME: probably we want to be slightly more careful about qualifiers and languages
+            //
+            // if the submitted value is already attached to the item, just skip it
+            if (dcValue.value.equals(dcv.value))
+            {
+                return;
+            }
+        }
+
+        // if we get to here, go on and add the metadata
+        item.addMetadata(dcv.schema, dcv.element, dcv.qualifier, dcv.language, dcv.value);
+    }
+
 	private void addMetadataToItem(Deposit deposit, Item item)
 			throws DSpaceSwordException
 	{
@@ -133,8 +163,8 @@ public class SimpleDCEntryIngester implements SwordEntryIngester
 			String titleField = this.dcMap.get("title");
 			if (titleField != null)
 			{
-				DCValue dcv = this.makeDCValue(titleField, title);
-				item.addMetadata(dcv.schema, dcv.element, dcv.qualifier, dcv.language, dcv.value);
+				Metadatum dcv = this.makeDCValue(titleField, title);
+                this.addUniqueMetadata(dcv, item);
 			}
 		}
 		if (summary != null)
@@ -142,8 +172,8 @@ public class SimpleDCEntryIngester implements SwordEntryIngester
 			String abstractField = this.dcMap.get("abstract");
 			if (abstractField != null)
 			{
-				DCValue dcv = this.makeDCValue(abstractField, summary);
-				item.addMetadata(dcv.schema, dcv.element, dcv.qualifier, dcv.language, dcv.value);
+				Metadatum dcv = this.makeDCValue(abstractField, summary);
+                this.addUniqueMetadata(dcv, item);
 			}
 		}
 
@@ -157,21 +187,12 @@ public class SimpleDCEntryIngester implements SwordEntryIngester
 				continue;
 			}
 
-			// clear any pre-existing metadata
-			DCValue dcv = this.makeDCValue(dsTerm, null);
-			if (dcv.qualifier == null)
-			{
-				item.clearMetadata(dcv.schema, dcv.element, Item.ANY, Item.ANY);
-			}
-			else
-			{
-				item.clearMetadata(dcv.schema, dcv.element, dcv.qualifier, Item.ANY);
-			}
-
 			// now add all the metadata terms
+            Metadatum dcv = this.makeDCValue(dsTerm, null);
 			for (String value : dc.get(term))
 			{
-				item.addMetadata(dcv.schema, dcv.element, dcv.qualifier, dcv.language, value);
+                dcv.value = value;
+                this.addUniqueMetadata(dcv, item);
 			}
 		}
 	}
@@ -241,13 +262,10 @@ public class SimpleDCEntryIngester implements SwordEntryIngester
 		}
     }
 
-	
-
-
-    public DCValue makeDCValue(String field, String value)
+    public Metadatum makeDCValue(String field, String value)
             throws DSpaceSwordException
     {
-        DCValue dcv = new DCValue();
+        Metadatum dcv = new Metadatum();
         String[] bits = field.split("\\.");
         if (bits.length < 2 || bits.length > 3)
         {
@@ -280,7 +298,7 @@ public class SimpleDCEntryIngester implements SwordEntryIngester
 			throw new DSpaceSwordException("No configuration, or configuration is invalid for: sword.updated.field");
 		}
 
-		DCValue dc = this.makeDCValue(field, null);
+		Metadatum dc = this.makeDCValue(field, null);
 		item.clearMetadata(dc.schema, dc.element, dc.qualifier, Item.ANY);
 		DCDate date = new DCDate(new Date());
 		item.addMetadata(dc.schema, dc.element, dc.qualifier, null, date.toString());
@@ -313,7 +331,7 @@ public class SimpleDCEntryIngester implements SwordEntryIngester
 			throw new DSpaceSwordException("No configuration, or configuration is invalid for: sword.slug.field");
 		}
 
-		DCValue dc = this.makeDCValue(field, null);
+		Metadatum dc = this.makeDCValue(field, null);
 		item.clearMetadata(dc.schema, dc.element, dc.qualifier, Item.ANY);
 		item.addMetadata(dc.schema, dc.element, dc.qualifier, null, slugVal);
 

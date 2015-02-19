@@ -19,7 +19,7 @@ import org.dspace.app.util.Util;
 import org.dspace.authorize.AuthorizeException;
 import org.dspace.content.Bitstream;
 import org.dspace.content.Bundle;
-import org.dspace.content.DCValue;
+import org.dspace.content.Metadatum;
 import org.dspace.content.Item;
 import org.dspace.content.WorkspaceItem;
 import org.dspace.core.ConfigurationManager;
@@ -155,7 +155,7 @@ public class InitialQuestionsStep extends AbstractProcessingStep
                 // shouldn't need to check if submission is null, but just in case!
                 if (!multipleTitles)
                 {
-                    DCValue[] altTitles = subInfo.getSubmissionItem().getItem()
+                    Metadatum[] altTitles = subInfo.getSubmissionItem().getItem()
                             .getDC("title", "alternative", Item.ANY);
 
                     willRemoveTitles = altTitles.length > 0;
@@ -163,11 +163,11 @@ public class InitialQuestionsStep extends AbstractProcessingStep
 
                 if (!publishedBefore)
                 {
-                    DCValue[] dateIssued = subInfo.getSubmissionItem().getItem()
+                    Metadatum[] dateIssued = subInfo.getSubmissionItem().getItem()
                             .getDC("date", "issued", Item.ANY);
-                    DCValue[] citation = subInfo.getSubmissionItem().getItem()
+                    Metadatum[] citation = subInfo.getSubmissionItem().getItem()
                             .getDC("identifier", "citation", Item.ANY);
-                    DCValue[] publisher = subInfo.getSubmissionItem().getItem()
+                    Metadatum[] publisher = subInfo.getSubmissionItem().getItem()
                             .getDC("publisher", null, Item.ANY);
 
                     willRemoveDate = (dateIssued.length > 0)
@@ -199,7 +199,7 @@ public class InitialQuestionsStep extends AbstractProcessingStep
                 request.setAttribute("will.remove.titles", Boolean.valueOf(willRemoveTitles));
                 request.setAttribute("will.remove.date", Boolean.valueOf(willRemoveDate));
                 request.setAttribute("will.remove.files", Boolean.valueOf(willRemoveFiles));
-                
+
                 return STATUS_VERIFY_PRUNE; // we will need to do pruning!
             }
         }
@@ -212,6 +212,20 @@ public class InitialQuestionsStep extends AbstractProcessingStep
         if (!subInfo.isInWorkflow())
         {
             subInfo.getSubmissionItem().setMultipleFiles(multipleFiles);
+        }
+
+        // If this work has not been published before & no issued date is set,
+        // then the assumption is that TODAY is the issued date.
+        // (This logic is necessary since the date field is hidden on DescribeStep when publishedBefore==false)
+        if(!publishedBefore)
+        {
+            Metadatum[] dateIssued = subInfo.getSubmissionItem().getItem()
+                            .getDC("date", "issued", Item.ANY);
+            if(dateIssued.length==0)
+            {
+                //Set issued date to "today" (NOTE: InstallItem will determine the actual date for us)
+                subInfo.getSubmissionItem().getItem().addDC("date", "issued", null, "today");
+            }
         }
 
         // commit all changes to DB

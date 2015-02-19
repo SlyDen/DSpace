@@ -15,6 +15,7 @@
   -    recent.submissions - RecetSubmissions
   --%>
 
+<%@page import="org.dspace.content.Bitstream"%>
 <%@ page contentType="text/html;charset=UTF-8" %>
 
 <%@ taglib uri="http://java.sun.com/jsp/jstl/fmt" prefix="fmt" %>
@@ -33,13 +34,12 @@
 <%@ page import="org.dspace.core.ConfigurationManager" %>
 <%@ page import="org.dspace.core.NewsManager" %>
 <%@ page import="org.dspace.browse.ItemCounter" %>
-<%@ page import="org.dspace.content.DCValue" %>
+<%@ page import="org.dspace.content.Metadatum" %>
 <%@ page import="org.dspace.content.Item" %>
 
 <%
     Community[] communities = (Community[]) request.getAttribute("communities");
 
-    Locale[] supportedLocales = I18nUtil.getSupportedLocales();
     Locale sessionLocale = UIUtil.getSessionLocale(request);
     Config.set(request.getSession(), Config.FMT_LOCALE, sessionLocale);
     String topNews = NewsManager.readNewsFile(LocaleSupport.getLocalizedMessage(pageContext, "news-top.html"));
@@ -59,135 +59,22 @@
 
 <dspace:layout locbar="nolink" titlekey="jsp.home.title" feedData="<%= feedData %>">
 
-    <table  width="95%" align="center">
-      <tr align="right">
-        <td align="right">						
-<% if (supportedLocales != null && supportedLocales.length > 1)
-{
-%>
-        <form method="get" name="repost" action="">
-          <input type ="hidden" name ="locale"/>
-        </form>
-<%
-for (int i = supportedLocales.length-1; i >= 0; i--)
-{
-%>
-        <a class ="langChangeOn"
-                  onclick="javascript:document.repost.locale.value='<%=supportedLocales[i].toString()%>';
-                  document.repost.submit();">
-                 <%= supportedLocales[i].getDisplayLanguage(supportedLocales[i])%>
-        </a> &nbsp;
-<%
-}
-}
-%>
-        </td>
-      </tr>
-      <tr>
-            <td class="oddRowEvenCol"><%= topNews %></td>
-        </tr>
-    </table>
-    <br/>
-    <form action="<%= request.getContextPath() %>/simple-search" method="get">
-        <table class="miscTable" width="95%" align="center">
-            <tr>
-                <td class="oddRowEvenCol">
-                  <h3><fmt:message key="jsp.home.search1"/></h3>
-                      <p><label for="tquery"><fmt:message key="jsp.home.search2"/></label></p>
-                      <p><input type="text" name="query" size="20" id="tquery" />&nbsp;
-                         <input type="submit" name="submit" value="<fmt:message key="jsp.general.search.button"/>" /></p>
-                </td>
-            </tr>
-        </table>
-    </form>
+	<div class="jumbotron">
+        <%= topNews %>
+	</div>
 
-<%
-if (communities != null && communities.length != 0)
-{
-%>
-    <br/>
-    <table class="miscTable" width="95%" align="center">
-        <tr>
-            <td class="oddRowEvenCol">
-               <h3><fmt:message key="jsp.home.com1"/></h3>
-                <p><fmt:message key="jsp.home.com2"/></p>
-
-
-                <table border="0" cellpadding="2">
-<%
-
-    for (int i = 0; i < communities.length; i++)
-    {
-%>
-                    <tr>
-                        <td class="standard">
-                            <a href="<%= request.getContextPath() %>/handle/<%= communities[i].getHandle() %>"><%= communities[i].getMetadata("name") %></a>
-<%
-        if (ConfigurationManager.getBooleanProperty("webui.strengths.show"))
-        {
-%>
-            [<%= ic.getCount(communities[i]) %>]
-<%
-        }
-
-%>
-                        </td>
-                    </tr>
-<%
-    }
-%>
-                </table>
-            </td>
-        </tr>
-    </table>
-<%
-}
-%>
-
+<div class="row">
 <%
 if (submissions != null && submissions.count() > 0)
 {
 %>
-    <br/>
-    <table class="miscTable" width="95%" align="center">
-        <tr>
-            <td class="oddRowEvenCol">
-                <h3><fmt:message key="jsp.collection-home.recentsub"/></h3>
-                <table border="0" cellpadding="2">
-<%
-    for (Item item : submissions.getRecentSubmissions())
-    {
-        DCValue[] dcv = item.getMetadata("dc", "title", null, Item.ANY);
-        String displayTitle = "Untitled";
-        if (dcv != null & dcv.length > 0)
-        {
-            displayTitle = dcv[0].value;
-        }
-%>
-                    <tr>
-                        <td class="standard10">
-                            <a href="<%= request.getContextPath() %>/handle/<%=item.getHandle() %>"><%= displayTitle%> </a>
-                        </td>
-                    </tr>
-<%
-     }
-%>
-                </table>
-             </td>
-         </tr>
-     </table>
-<%
-}
-%>
-    <dspace:sidebar>
-    <%= sideNews %>
-    <%
+        <div class="col-md-8">
+        <div class="panel panel-primary">        
+        <div id="recent-submissions-carousel" class="panel-heading carousel slide">
+          <h3><fmt:message key="jsp.collection-home.recentsub"/>
+              <%
     if(feedEnabled)
     {
-	%>
-	    <center>
-	    <h4><fmt:message key="jsp.home.feeds"/></h4>
-	<%
 	    	String[] fmts = feedData.substring(feedData.indexOf(':')+1).split(",");
 	    	String icon = null;
 	    	int width = 0;
@@ -209,14 +96,122 @@ if (submissions != null && submissions.count() > 0)
 	    	       width = 36;
 	    	    }
 	%>
-	    <a href="<%= request.getContextPath() %>/feed/<%= fmts[j] %>/site"><img src="<%= request.getContextPath() %>/image/<%= icon %>" alt="RSS Feed" width="<%= width %>" height="15" vspace="3" border="0" /></a>
+	    <a href="<%= request.getContextPath() %>/feed/<%= fmts[j] %>/site"><img src="<%= request.getContextPath() %>/image/<%= icon %>" alt="RSS Feed" width="<%= width %>" height="15" style="margin: 3px 0 3px" /></a>
 	<%
 	    	}
-	%>
-	    </center>
-	<%
 	    }
 	%>
+          </h3>
+          
+		  <!-- Wrapper for slides -->
+		  <div class="carousel-inner">
+		    <%
+		    boolean first = true;
+		    for (Item item : submissions.getRecentSubmissions())
+		    {
+		        Metadatum[] dcv = item.getMetadata("dc", "title", null, Item.ANY);
+		        String displayTitle = "Untitled";
+		        if (dcv != null & dcv.length > 0)
+		        {
+		            displayTitle = dcv[0].value;
+		        }
+		        dcv = item.getMetadata("dc", "description", "abstract", Item.ANY);
+		        String displayAbstract = "";
+		        if (dcv != null & dcv.length > 0)
+		        {
+		            displayAbstract = dcv[0].value;
+		        }
+		%>
+		    <div style="padding-bottom: 50px; min-height: 200px;" class="item <%= first?"active":""%>">
+		      <div style="padding-left: 80px; padding-right: 80px; display: inline-block;"><%= StringUtils.abbreviate(displayTitle, 400) %> 
+		      	<a href="<%= request.getContextPath() %>/handle/<%=item.getHandle() %>" class="btn btn-success">See</a>
+                        <p><%= StringUtils.abbreviate(displayAbstract, 500) %></p>
+		      </div>
+		    </div>
+		<%
+				first = false;
+		     }
+		%>
+		  </div>
+
+		  <!-- Controls -->
+		  <a class="left carousel-control" href="#recent-submissions-carousel" data-slide="prev">
+		    <span class="icon-prev"></span>
+		  </a>
+		  <a class="right carousel-control" href="#recent-submissions-carousel" data-slide="next">
+		    <span class="icon-next"></span>
+		  </a>
+
+          <ol class="carousel-indicators">
+		    <li data-target="#recent-submissions-carousel" data-slide-to="0" class="active"></li>
+		    <% for (int i = 1; i < submissions.count(); i++){ %>
+		    <li data-target="#recent-submissions-carousel" data-slide-to="<%= i %>"></li>
+		    <% } %>
+	      </ol>
+     </div></div></div>
+<%
+}
+%>
+<div class="col-md-4">
+    <%= sideNews %>
+</div>
+</div>
+<div class="container row">
+<%
+if (communities != null && communities.length != 0)
+{
+%>
+	<div class="col-md-4">		
+               <h3><fmt:message key="jsp.home.com1"/></h3>
+                <p><fmt:message key="jsp.home.com2"/></p>
+				<div class="list-group">
+<%
+	boolean showLogos = ConfigurationManager.getBooleanProperty("jspui.home-page.logos", true);
+    for (int i = 0; i < communities.length; i++)
+    {
+%><div class="list-group-item row">
+<%  
+		Bitstream logo = communities[i].getLogo();
+		if (showLogos && logo != null) { %>
+	<div class="col-md-3">
+        <img alt="Logo" class="img-responsive" src="<%= request.getContextPath() %>/retrieve/<%= logo.getID() %>" /> 
+	</div>
+	<div class="col-md-9">
+<% } else { %>
+	<div class="col-md-12">
+<% }  %>		
+		<h4 class="list-group-item-heading"><a href="<%= request.getContextPath() %>/handle/<%= communities[i].getHandle() %>"><%= communities[i].getMetadata("name") %></a>
+<%
+        if (ConfigurationManager.getBooleanProperty("webui.strengths.show"))
+        {
+%>
+		<span class="badge pull-right"><%= ic.getCount(communities[i]) %></span>
+<%
+        }
+
+%>
+		</h4>
+		<p><%= communities[i].getMetadata("short_description") %></p>
+    </div>
+</div>                            
+<%
+    }
+%>
+	</div>
+	</div>
+<%
+}
+%>
+	<%
+    	int discovery_panel_cols = 8;
+    	int discovery_facet_cols = 4;
+    %>
 	<%@ include file="discovery/static-sidebar-facet.jsp" %>
-    </dspace:sidebar>
+</div>
+
+<div class="row">
+	<%@ include file="discovery/static-tagcloud-facet.jsp" %>
+</div>
+	
+</div>
 </dspace:layout>

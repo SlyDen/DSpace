@@ -8,6 +8,8 @@
 package org.dspace.statistics;
 
 
+import com.google.common.base.Charsets;
+import com.google.common.io.Resources;
 import com.maxmind.geoip.Location;
 import com.maxmind.geoip.LookupService;
 import org.apache.commons.lang.exception.ExceptionUtils;
@@ -21,17 +23,19 @@ import org.dspace.eperson.EPerson;
 import org.dspace.statistics.util.DnsLookup;
 import org.dspace.statistics.util.LocationUtils;
 import org.dspace.statistics.util.SpiderDetector;
-import org.elasticsearch.action.ActionFuture;
-import org.elasticsearch.action.admin.indices.exists.IndicesExistsRequest;
-import org.elasticsearch.action.admin.indices.exists.IndicesExistsResponse;
+
+import org.elasticsearch.action.admin.cluster.health.ClusterHealthResponse;
+import org.elasticsearch.action.admin.cluster.health.ClusterHealthStatus;
+import org.elasticsearch.action.admin.indices.mapping.put.PutMappingRequestBuilder;
 import org.elasticsearch.action.admin.indices.mapping.put.PutMappingResponse;
+import org.elasticsearch.action.index.IndexRequestBuilder;
 import org.elasticsearch.client.Client;
-import org.elasticsearch.client.action.admin.indices.mapping.put.PutMappingRequestBuilder;
-import org.elasticsearch.client.action.index.IndexRequestBuilder;
+
 import org.elasticsearch.client.transport.TransportClient;
 import org.elasticsearch.common.settings.ImmutableSettings;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.InetSocketTransportAddress;
+import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.node.Node;
@@ -40,10 +44,9 @@ import org.elasticsearch.node.NodeBuilder;
 import javax.servlet.http.HttpServletRequest;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.net.URL;
 import java.sql.SQLException;
 import java.util.*;
-
-import static org.elasticsearch.common.xcontent.XContentFactory.jsonBuilder;
 
 public class ElasticSearchLogger {
 
@@ -123,111 +126,42 @@ public class ElasticSearchLogger {
 
         //Initialize the connection to Elastic Search, and ensure our index is available.
         client = getClient();
+            boolean hasIndex = false;
+            try {
+                log.info("Checking Elastic Search cluster health...");
+                ClusterHealthResponse healthResponse = client.admin().cluster().prepareHealth(indexName).setWaitForYellowStatus()
+                        .setTimeout(TimeValue.timeValueSeconds(30)).execute()
+                        .actionGet();
 
-        IndicesExistsRequest indicesExistsRequest = new IndicesExistsRequest();
-        indicesExistsRequest.indices(new String[] {indexName});
+                if (healthResponse.isTimedOut() || healthResponse.getStatus() == ClusterHealthStatus.RED) {
+                    throw new IllegalStateException("cluster not ready due to health: " + healthResponse.toString());
+                }
 
-        ActionFuture<IndicesExistsResponse> actionFutureIndicesExist = client.admin().indices().exists(indicesExistsRequest);        
-        log.info("DS ES Checking if index exists");
-        if(! actionFutureIndicesExist.actionGet().isExists() ) {
+                log.info("DS ES Checking if index exists");
+                hasIndex = client.admin().indices().prepareExists(indexName).execute().actionGet().isExists();
+            } catch (Exception e) {
+                log.error("Exception during health check, likely have to create index and put mapping still. Exception:" + e.getMessage());
+                hasIndex = false;
+            }
+
+        if(! hasIndex) {
             //If elastic search index exists, then we are good to go, otherwise, we need to create that index. Should only need to happen once ever.
             log.info("DS ES index didn't exist, we need to create it.");
 
-            Settings settings = ImmutableSettings.settingsBuilder()
-                    .put("number_of_replicas", 1)
-                    .put("number_of_shards", 5)
-                    .put("cluster.name", clusterName)
-                    .build();
-            
-            String stringMappingJSON = "{\""+indexType+"\" : { \"properties\" : {\n" +
-                    "   \"userAgent\":{\n" +
-                    "      \"type\":\"string\"\n" +
-                    "   },\n" +
-                    "   \"countryCode\":{\n" +
-                    "      \"type\":\"string\",\n" +
-                    "      \"index\":\"not_analyzed\",\n" +
-                    "      \"omit_norms\":true\n" +
-                    "   },\n" +
-                    "   \"dns\":{\n" +
-                    "      \"type\":\"multi_field\",\n" +
-                    "      \"fields\": {\n" +
-                    "        \"dns\": {\"type\":\"string\",\"index\":\"analyzed\"},\n" +
-                    "        \"untouched\":{\"type\":\"string\",\"index\":\"not_analyzed\"}\n" +
-                    "      }\n" +
-                    "   },\n" +
-                    "   \"isBot\":{\n" +
-                    "      \"type\":\"boolean\"\n" +
-                    "   },\n" +
-                    "   \"owningColl\":{\n" +
-                    "      \"type\":\"integer\",\n" +
-                    "      \"index\":\"not_analyzed\"\n" +
-                    "   },\n" +
-                    "   \"type\":{\n" +
-                    "      \"type\":\"string\",\n" +
-                    "      \"index\":\"not_analyzed\",\n" +
-                    "      \"omit_norms\":true\n" +
-                    "   },\n" +
-                    "   \"owningComm\":{\n" +
-                    "      \"type\":\"integer\",\n" +
-                    "      \"index\":\"not_analyzed\"\n" +
-                    "   },\n" +
-                    "   \"city\":{\n" +
-                    "      \"type\":\"multi_field\",\n" +
-                    "      \"fields\": {\n" +
-                    "        \"city\": {\"type\":\"string\",\"index\":\"analyzed\"},\n" +
-                    "        \"untouched\":{\"type\":\"string\",\"index\":\"not_analyzed\"}\n" +
-                    "      }\n" +
-                    "   },\n" +
-                    "   \"country\":{\n" +
-                    "      \"type\":\"multi_field\",\n" +
-                    "      \"fields\": {\n" +
-                    "         \"country\": {\"type\":\"string\",\"index\":\"analyzed\"},\n" +
-                    "         \"untouched\":{\"type\":\"string\",\"index\":\"not_analyzed\"}\n" +
-                    "       }\n" +
-                    "   },\n" +
-                    "   \"ip\":{\n" +
-                    "      \"type\":\"multi_field\",\n" +
-                    "       \"fields\": {\n" +
-                    "         \"ip\": {\"type\":\"string\",\"index\":\"analyzed\"},\n" +
-                    "         \"untouched\":{\"type\":\"string\",\"index\":\"not_analyzed\"}\n" +
-                    "       }\n" +
-                    "   },\n" +
-                    "   \"id\":{\n" +
-                    "      \"type\":\"integer\",\n" +
-                    "      \"index\":\"not_analyzed\"\n" +
-                    "   },\n" +
-                    "   \"time\":{\n" +
-                    "      \"type\":\"date\"\n" +
-                    "   },\n" +
-                    "   \"owningItem\":{\n" +
-                    "      \"type\":\"string\",\n" +
-                    "      \"index\":\"not_analyzed\"\n" +
-                    "   },\n" +
-                    "   \"continent\":{\n" +
-                    "      \"type\":\"string\",\n" +
-                    "      \"index\":\"not_analyzed\"\n" +
-                    "   },\n" +
-                    "   \"geo\":{\n" +
-                    "      \"type\":\"geo_point\"\n" +
-                    "   },\n" +
-                    "   \"bundleName\":{\n" +
-                    "      \"type\":\"string\",\n" +
-                    "      \"index\":\"not_analyzed\"\n" +
-                    "   },\n" +
-                    "   \"epersonid\":{\n" +
-                    "      \"type\":\"string\",\n" +
-                    "      \"index\":\"not_analyzed\"\n" +
-                    "   }\n" +
-                    "} } }";
+            String mappingPath = ElasticSearchLogger.class.getPackage().getName().replaceAll("\\.", "/") ;
+            URL url = Resources.getResource(mappingPath + "/elasticsearch-statistics-mapping.json");
+            String stringMappingJSON = Resources.toString(url, Charsets.UTF_8);
+            stringMappingJSON = stringMappingJSON.replace("stats", indexType);
 
+            //Necessary to post, in order for index/type to be created.
             client.prepareIndex(indexName, indexType, "1")
                     .setSource(XContentFactory.jsonBuilder()
-                                .startObject()
+                                    .startObject()
                                     .field("user", "kimchy")
                                     .field("postDate", new Date())
                                     .field("message", "trying out Elastic Search")
-                                .endObject()
-                              )
+                                    .endObject()
+                    )
                     .execute()
                     .actionGet();
 
@@ -242,7 +176,7 @@ public class ElasticSearchLogger {
             putMappingRequestBuilder.setSource(stringMappingJSON);
             PutMappingResponse response = putMappingRequestBuilder.execute().actionGet();
 
-            if(!response.getAcknowledged()) {
+            if(!response.isAcknowledged()) {
                 log.info("Could not define mapping for type ["+indexName+"]/["+indexType+"]");
             } else {
                 log.info("Successfully put mapping for ["+indexName+"]/["+indexType+"]");
@@ -256,7 +190,7 @@ public class ElasticSearchLogger {
         log.info("DSpace ElasticSearchLogger Initialized Successfully (I suppose)");
 
         } catch (Exception e) {
-            log.info("Elastic Search crashed during init. " + e.getMessage());
+            log.error("Elastic Search crashed during init. " + e.getMessage(), e);
         }
     }
 
@@ -379,6 +313,124 @@ public class ElasticSearchLogger {
         }
     }
 
+    public void post(DSpaceObject dspaceObject, String ip, String userAgent, String xforwardedfor, EPerson currentUser) {
+        //log.info("DS-ES post for type:"+dspaceObject.getType() + " -- " + dspaceObject.getName());
+
+        client = ElasticSearchLogger.getInstance().getClient();
+
+        boolean isSpiderBot = SpiderDetector.isSpider(ip);
+
+        try {
+            if (isSpiderBot &&
+                    !ConfigurationManager.getBooleanProperty("usage-statistics", "logBots", true)) {
+                return;
+            }
+
+
+            // Save our basic info that we already have
+
+            if (isUseProxies() && xforwardedfor != null) {
+                /* This header is a comma delimited list */
+                for (String xfip : xforwardedfor.split(",")) {
+                    /* proxy itself will sometime populate this header with the same value in
+                        remote address. ordering in spec is vague, we'll just take the last
+                        not equal to the proxy
+                    */
+                    if (!xforwardedfor.contains(ip)) {
+                        ip = xfip.trim();
+                    }
+                }
+            }
+
+            XContentBuilder docBuilder = null;
+
+
+            docBuilder = XContentFactory.jsonBuilder().startObject();
+
+
+            docBuilder.field("ip", ip);
+
+            docBuilder.field("id", dspaceObject.getID());
+
+            // The numerical constant that represents the DSpaceObject TYPE. i.e. 0=bitstream, 2=item, ...
+            docBuilder.field("typeIndex", dspaceObject.getType());
+
+            // The text that represent the DSpaceObject TYPE. i.e. BITSTREAM, ITEM, COLLECTION, COMMUNITY
+            docBuilder.field("type", Constants.typeText[dspaceObject.getType()]);
+
+            // Save the current time
+            docBuilder.field("time", DateFormatUtils.format(new Date(), DATE_FORMAT_8601));
+            if (currentUser != null) {
+                docBuilder.field("epersonid", currentUser.getID());
+            }
+
+            try {
+                String dns = DnsLookup.reverseDns(ip);
+                docBuilder.field("dns", dns.toLowerCase());
+            } catch (Exception e) {
+                log.error("Failed DNS Lookup for IP:" + ip);
+                log.debug(e.getMessage(), e);
+            }
+
+            // Save the location information if valid, save the event without
+            // location information if not valid
+            Location location = locationService.getLocation(ip);
+            if (location != null
+                    && !("--".equals(location.countryCode)
+                    && location.latitude == -180 && location.longitude == -180)) {
+                try {
+                    docBuilder.field("continent", LocationUtils
+                            .getContinentCode(location.countryCode));
+                } catch (Exception e) {
+                    System.out
+                            .println("COUNTRY ERROR: " + location.countryCode);
+                }
+                docBuilder.field("countryCode", location.countryCode);
+                docBuilder.field("city", location.city);
+                docBuilder.field("latitude", location.latitude);
+                docBuilder.field("longitude", location.longitude);
+                docBuilder.field("isBot", isSpiderBot);
+
+                if (userAgent != null) {
+                    docBuilder.field("userAgent", userAgent);
+                }
+            }
+
+            if (dspaceObject instanceof Bitstream) {
+                Bitstream bit = (Bitstream) dspaceObject;
+                Bundle[] bundles = bit.getBundles();
+                docBuilder.field("bundleName").startArray();
+                for (Bundle bundle : bundles) {
+                    docBuilder.value(bundle.getName());
+                }
+                docBuilder.endArray();
+            }
+
+            storeParents(docBuilder, getParents(dspaceObject));
+
+            docBuilder.endObject();
+
+            if (docBuilder != null) {
+                IndexRequestBuilder irb = client.prepareIndex(indexName, indexType)
+                        .setSource(docBuilder);
+                //log.info("Executing document insert into index");
+                if(client == null) {
+                    log.error("Hey, client is null");
+                }
+                irb.execute().actionGet();
+            }
+
+        } catch (RuntimeException re) {
+            log.error("RunTimer in ESL:\n" + ExceptionUtils.getStackTrace(re));
+            throw re;
+        } catch (Exception e) {
+            log.error(e.getMessage());
+        } finally {
+            client.close();
+        }
+    }
+
+    
     public static String getClusterName() {
         return clusterName;
     }
@@ -532,7 +584,7 @@ public class ElasticSearchLogger {
     public Client createNodeClient(ClientType clientType) {
         String dspaceDir = ConfigurationManager.getProperty("dspace.dir");
         Settings settings = ImmutableSettings.settingsBuilder().put("path.data", dspaceDir + "/elasticsearch/").build();
-        
+
         NodeBuilder nodeBuilder = NodeBuilder.nodeBuilder().clusterName(clusterName).data(true).settings(settings);
 
         if(clientType == ClientType.LOCAL) {

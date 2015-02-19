@@ -19,7 +19,7 @@ import org.apache.log4j.Logger;
 import org.dspace.app.util.SubmissionInfo;
 import org.dspace.app.util.Util;
 import org.dspace.authorize.AuthorizeException;
-import org.dspace.content.DCValue;
+import org.dspace.content.Metadatum;
 import org.dspace.content.Item;
 import org.dspace.core.ConfigurationManager;
 import org.dspace.core.Context;
@@ -100,7 +100,8 @@ public class CCLicenseStep extends AbstractProcessingStep
         session.setAttribute("inProgress", "TRUE");
         // check what submit button was pressed in User Interface
         String buttonPressed = Util.getSubmitButton(request, NEXT_BUTTON);
-        if (buttonPressed.equals("submit_grant"))
+		if ("submit_grant".equalsIgnoreCase(buttonPressed)
+				|| "submit_no_cc".equalsIgnoreCase(buttonPressed))
         {
             return processCC(context, request, response, subInfo);
         }

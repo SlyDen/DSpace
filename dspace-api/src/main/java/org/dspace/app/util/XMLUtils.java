@@ -189,4 +189,8 @@ public class XMLUtils
         }
         return result;
     }
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> 2eaaf84810b3a3de0907e3e37ab695b053cc381f

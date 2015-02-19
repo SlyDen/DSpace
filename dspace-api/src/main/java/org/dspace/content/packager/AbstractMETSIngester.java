@@ -749,6 +749,8 @@ public abstract class AbstractMETSIngester extends AbstractPackageIngester
         // Loop through these files, and add them one by one to Item
         List<Element> manifestContentFiles = manifest
                 .getContentFiles();
+        List<Element> manifestBundleFiles = manifest
+                .getBundleFiles();
 
         boolean setPrimaryBitstream = false;
         BitstreamFormat unknownFormat = BitstreamFormat.findUnknown(context);
@@ -835,6 +837,40 @@ public abstract class AbstractMETSIngester extends AbstractPackageIngester
                 bitstream.setFormat(bf);
             }
             bitstream.update();
+        }// end for each manifest file
+
+        for (Iterator<Element> mi = manifestBundleFiles.iterator(); mi
+                .hasNext();)
+        {
+            Element mfile = mi.next();
+
+            String bundleName = METSManifest.getBundleName(mfile, false);
+
+            Bundle bundle;
+            Bundle bns[] = item.getBundles(bundleName);
+            if (bns != null && bns.length > 0)
+            {
+                bundle = bns[0];
+            }
+            else
+            {
+                bundle = item.createBundle(bundleName);
+            }
+
+	        String mfileGrp = mfile.getAttributeValue("ADMID");
+	        if (mfileGrp != null)
+	        {
+		        manifest.crosswalkBundle(context, params, bundle, mfileGrp,mdRefCallback);
+	        }
+	        else
+	        {
+		        if (log.isDebugEnabled())
+		        {
+		            log.debug("Ingesting bundle with no ADMID, not crosswalking bundle metadata");
+		        }
+	        }
+
+            bundle.update();
         }// end for each manifest file
 
         // Step 3 -- Sanity checks
@@ -1451,7 +1487,13 @@ public abstract class AbstractMETSIngester extends AbstractPackageIngester
             ZipEntry manifestEntry = zipPackage.getEntry(path);
 
             // Get inputStream associated with this file
-            return zipPackage.getInputStream(manifestEntry);
+            if (manifestEntry != null)
+                return zipPackage.getInputStream(manifestEntry);
+            else
+            {
+                throw new MetadataValidationException("Manifest file references file '"
+                                        + path + "' not included in the zip.");
+            }
         }
     }
 

@@ -7,13 +7,10 @@
  */
 package org.dspace.authenticate;
 
+import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
-import java.sql.Connection;
-import java.sql.DatabaseMetaData;
-import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 
 import javax.servlet.http.HttpServletRequest;
 
@@ -26,12 +23,17 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.logging.Level;
 
 import javax.servlet.http.HttpServletResponse;
 
+import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
 import org.dspace.authorize.AuthorizeException;
 
+import org.dspace.content.MetadataField;
+import org.dspace.content.MetadataSchema;
+import org.dspace.content.NonUniqueMetadataException;
 import org.dspace.core.Context;
 import org.dspace.core.ConfigurationManager;
 import org.dspace.authenticate.AuthenticationManager;
@@ -178,7 +180,7 @@ public class ShibAuthentication implements AuthenticationMethod
 		}
 
 		// Initialize the additional EPerson metadata.
-		initialize();
+        initialize(context);
 
 		// Log all headers received if debugging is turned on. This is enormously
 		// helpful when debugging shibboleth related problems.
@@ -186,9 +188,11 @@ public class ShibAuthentication implements AuthenticationMethod
 			log.debug("Starting Shibboleth Authentication");
 
 			String message = "Received the following headers:\n";
+			@SuppressWarnings("unchecked")
 			Enumeration<String> headerNames = request.getHeaderNames();
 			while (headerNames.hasMoreElements()) {
 				String headerName = headerNames.nextElement();
+				@SuppressWarnings("unchecked")
 				Enumeration<String> headerValues = request.getHeaders(headerName);
 				while (headerValues.hasMoreElements()) {
 					String headerValue = headerValues.nextElement();
@@ -301,7 +305,7 @@ public class ShibAuthentication implements AuthenticationMethod
 			}
 
 			// Get the Shib supplied affiliation or use the default affiliation
-			List<String> affiliations = findMultipleHeaders(request, roleHeader);
+			List<String> affiliations = findMultipleAttributes(request, roleHeader);
 			if (affiliations == null) {
 				if (defaultRoles != null)
 					affiliations = Arrays.asList(defaultRoles.split(","));
@@ -482,7 +486,7 @@ public class ShibAuthentication implements AuthenticationMethod
 			// Shibboleth authentication initiator 
 			if (shibURL == null || shibURL.length() == 0)
 				shibURL = "/Shibboleth.sso/Login";
-			shibURL.trim();
+			shibURL = shibURL.trim();
 
 			// Determine the return URL, where shib will send the user after authenticating. We need it to go back
 			// to DSpace's shibboleth-login url so the we will extract the user's information and locally
@@ -577,7 +581,7 @@ public class ShibAuthentication implements AuthenticationMethod
 
 		// 1) First, look for a netid header.
 		if (netidHeader != null) {
-			String netid = findSingleHeader(request,netidHeader);
+			String netid = findSingleAttribute(request,netidHeader);
 
 			if (netid != null) {
 				foundNetID = true;
@@ -592,7 +596,7 @@ public class ShibAuthentication implements AuthenticationMethod
 
 		// 2) Second, look for an email header.
 		if (eperson == null && emailHeader != null) {
-			String email = findSingleHeader(request,emailHeader);
+			String email = findSingleAttribute(request,emailHeader);
 
 			if (email != null) {
 				foundEmail = true;
@@ -618,7 +622,7 @@ public class ShibAuthentication implements AuthenticationMethod
 
 			if (email != null) {
 				foundRemoteUser = true;
-				email.toLowerCase();
+				email = email.toLowerCase();
 				eperson = EPerson.findByEmail(context, email);
 
 				if (eperson == null)
@@ -670,12 +674,12 @@ public class ShibAuthentication implements AuthenticationMethod
 		String lnameHeader = ConfigurationManager.getProperty("authentication-shibboleth","lastname-header");
 
 		// Header values
-		String netid = findSingleHeader(request,netidHeader);
-		String email = findSingleHeader(request,emailHeader);
-		String fname = findSingleHeader(request,fnameHeader);
-		String lname = findSingleHeader(request,lnameHeader);
+		String netid = findSingleAttribute(request,netidHeader);
+		String email = findSingleAttribute(request,emailHeader);
+		String fname = findSingleAttribute(request,fnameHeader);
+		String lname = findSingleAttribute(request,lnameHeader);
 
-		if ( email == null || fname == null || lname == null) {
+		if ( email == null || (fnameHeader != null && fname == null) || (lnameHeader != null && lname == null)) {
 			// We require that there be an email, first name, and last name. If we
 			// don't have at least these three pieces of information then we fail.
 			String message = "Unable to register new eperson because we are unable to find an email address along with first and last name for the user.\n";
@@ -689,11 +693,11 @@ public class ShibAuthentication implements AuthenticationMethod
 		}
 
 		// Truncate values of parameters that are too big.
-		if (fname.length() > NAME_MAX_SIZE) {
+		if (fname != null && fname.length() > NAME_MAX_SIZE) {
 			log.warn("Truncating eperson's first name because it is longer than "+NAME_MAX_SIZE+": '"+fname+"'");
 			fname = fname.substring(0,NAME_MAX_SIZE);
 		}
-		if (lname.length() > NAME_MAX_SIZE) {
+		if (lname != null && lname.length() > NAME_MAX_SIZE) {
 			log.warn("Truncating eperson's last name because it is longer than "+NAME_MAX_SIZE+": '"+lname+"'");
 			lname = lname.substring(0,NAME_MAX_SIZE);
 		}
@@ -706,8 +710,10 @@ public class ShibAuthentication implements AuthenticationMethod
 		if (netid != null)
 			eperson.setNetid(netid);
 		eperson.setEmail(email.toLowerCase());
-		eperson.setFirstName(fname);
-		eperson.setLastName(lname);
+		if ( fname != null )
+			eperson.setFirstName(fname);
+		if ( lname != null )
+			eperson.setLastName(lname);
 		eperson.setCanLogIn(true);
 
 		// Commit the new eperson
@@ -756,17 +762,17 @@ public class ShibAuthentication implements AuthenticationMethod
 		String fnameHeader = ConfigurationManager.getProperty("authentication-shibboleth","firstname-header");
 		String lnameHeader = ConfigurationManager.getProperty("authentication-shibboleth","lastname-header");
 
-		String netid = findSingleHeader(request,netidHeader);
-		String email = findSingleHeader(request,emailHeader);
-		String fname = findSingleHeader(request,fnameHeader);
-		String lname = findSingleHeader(request,lnameHeader);
+		String netid = findSingleAttribute(request,netidHeader);
+		String email = findSingleAttribute(request,emailHeader);
+		String fname = findSingleAttribute(request,fnameHeader);
+		String lname = findSingleAttribute(request,lnameHeader);
 
 		// Truncate values of parameters that are too big.
-		if (fname.length() > NAME_MAX_SIZE) {
+		if (fname != null && fname.length() > NAME_MAX_SIZE) {
 			log.warn("Truncating eperson's first name because it is longer than "+NAME_MAX_SIZE+": '"+fname+"'");
 			fname = fname.substring(0,NAME_MAX_SIZE);
 		}
-		if (lname.length() > NAME_MAX_SIZE) {
+		if (lname != null && lname.length() > NAME_MAX_SIZE) {
 			log.warn("Truncating eperson's last name because it is longer than "+NAME_MAX_SIZE+": '"+lname+"'");
 			lname = lname.substring(0,NAME_MAX_SIZE);
 		}
@@ -799,7 +805,7 @@ public class ShibAuthentication implements AuthenticationMethod
 		for (String header : metadataHeaderMap.keySet()) {
 
 			String field = metadataHeaderMap.get(header);
-			String value = findSingleHeader(request, header);
+			String value = findSingleAttribute(request, header);
 
 			// Truncate values
 			if (value == null) {
@@ -888,8 +894,9 @@ public class ShibAuthentication implements AuthenticationMethod
 	 * the field will be automatically created.
 	 * 
 	 * It is safe to call this methods multiple times.
+     * @param context
 	 */
-	private synchronized static void initialize() throws SQLException {
+    private synchronized static void initialize(Context context) throws SQLException {
 
 		if (metadataHeaderMap != null)
 			return;
@@ -925,10 +932,10 @@ public class ShibAuthentication implements AuthenticationMethod
 			String header = metadataParts[0].trim();
 			String name = metadataParts[1].trim().toLowerCase();
 
-			boolean valid = checkIfEpersonMetadataFieldExists(name);
+            boolean valid = checkIfEpersonMetadataFieldExists(name,context);
 
 			if ( ! valid && autoCreate) {
-				valid = autoCreateEpersonMetadataField(name);
+                valid = autoCreateEpersonMetadataField(name,context);
 			}
 
 			if (valid) {
@@ -947,18 +954,13 @@ public class ShibAuthentication implements AuthenticationMethod
 	}
 
 	/**
-	 * Check the EPerson table definition to see if the metadata field name is supported. It
-	 * checks for three things 1) that the field exists and 2) that the field is of the correct
-	 * type, varchar, and 3) that the field's size is sufficient.
+     * Check if a MetadataField for an eperson is available.
 	 * 
-	 * If either of these checks fail then false is returned.
-	 *
-	 * If all these checks pass then true is returned, otherwise false.
-	 *
 	 * @param metadataName The name of the metadata field.
+     * @param context
 	 * @return True if a valid metadata field, otherwise false.
 	 */
-	private static synchronized boolean checkIfEpersonMetadataFieldExists(String metadataName) throws SQLException {
+    private static synchronized boolean checkIfEpersonMetadataFieldExists(String metadataName, Context context) throws SQLException {
 
 		if (metadataName == null)
 			return false;
@@ -967,47 +969,23 @@ public class ShibAuthentication implements AuthenticationMethod
 			// The phone is a predefined field
 			return true;
 
-		// Get a list of all the columns on the eperson table.
-		Connection dbConnection = null;
-		try {
-			dbConnection = DatabaseManager.getConnection();
-			DatabaseMetaData dbMetadata = dbConnection.getMetaData();
-			String dbCatalog = dbConnection.getCatalog();
-			ResultSet rs = dbMetadata.getColumns(dbCatalog,null,"eperson","%");
+        MetadataSchema schemaObj = MetadataSchema.find(context, "eperson");
 
-			// Loop through all the columns looking for our metadata field and check
-			// it's definition.
-			boolean foundColumn = false;
-			boolean columnValid = false;
-			while (rs.next()) {
-				String columnName = rs.getString("COLUMN_NAME");
-				String columnType = rs.getString("TYPE_NAME");
-				int size = rs.getInt("COLUMN_SIZE");
+        if (schemaObj == null)
+        {
+            log.error("Schema eperson is not registered and does not exist.");
+        } else
+        {
+            MetadataField eperson = MetadataField.findByElement(context, schemaObj.getSchemaID(), metadataName, null);
 
-				if (metadataName.equalsIgnoreCase(columnName)) {
-					foundColumn = true;
-
-					if ("varchar".equals(columnType) && size >= METADATA_MAX_SIZE)
-						columnValid = true;
-
-					break; // skip out on loop after we found our column.
+            if ( eperson!=null) {
+                return true;
 				}
+            else {
+                log.error("Unable to find eperson named: '" + metadataName + "'");
+            }
+        }
 
-			} // while rs.next()
-			rs.close();
-
-			if ( foundColumn && columnValid)
-				// The finally statement below will close the connection.
-				return true;
-			else if (!foundColumn)
-				log.error("Unable to find eperson column for additional metadata named: '"+metadataName+"'");
-			else if (!columnValid)
-				log.error("The eperson column for additional metadata, '"+metadataName+"', is not defined as a varchar with at least a length of "+METADATA_MAX_SIZE);
-
-		} finally {
-			if (dbConnection != null)
-				dbConnection.close();
-		}
 		return false;
 	}
 
@@ -1015,13 +993,12 @@ public class ShibAuthentication implements AuthenticationMethod
 	private static final String COLUMN_NAME_REGEX = "^[_A-Za-z0-9]+$";
 	
 	/**
-	 * Automattically create a new column in the EPerson table to support the additional
-	 * metadata field. All additional fields are created with type varchar( METADATA_MAX_SIZE )
+     * Automattically create a new metadataField for an eperson
 	 * 
 	 * @param metadataName The name of the new metadata field.
 	 * @return True if successful, otherwise false.
 	 */
-	private static synchronized boolean autoCreateEpersonMetadataField(String metadataName) throws SQLException {
+    private static synchronized boolean autoCreateEpersonMetadataField(String metadataName, Context context) throws SQLException {
 
 		if (metadataName == null)
 			return false;
@@ -1033,29 +1010,33 @@ public class ShibAuthentication implements AuthenticationMethod
 		if ( ! metadataName.matches(COLUMN_NAME_REGEX))
 			return false;
 
-		// Create a new column for the metadata field. Note the metadataName variable is embedded because we can't use 
-		// paramaterization for column names. However the string comes from the dspace.cfg and at the top of this method
-		// we run a regex on it to validate it.
-		String sql = "ALTER TABLE eperson ADD COLUMN "+metadataName+" varchar("+METADATA_MAX_SIZE+")";
 
-		Connection dbConnection = null;
+        MetadataSchema schemaObj = MetadataSchema.find(context, "eperson");
+
+        if (schemaObj == null)
+        {
+            log.error("Schema eperson is not registered and does not exist.");
+        } else {
+            MetadataField metadataField = new MetadataField(schemaObj, metadataName, null, null);
 		try {
-			dbConnection = DatabaseManager.getConnection();
-			Statement alterStatement = dbConnection.createStatement();
-			alterStatement.execute(sql);
-			alterStatement.close();
-			dbConnection.commit();
+                metadataField.create(context);
+            } catch (IOException e) {
+                log.error("Unable to auto-create the eperson MetadataField with MetadataName " + metadataName ,e);
+                return false;
+            } catch (AuthorizeException e) {
+                log.error("Unauthorized to auto-create the eperson MetadataField with MetadataName " + metadataName + " MetadataField", e);
+                return false;
+            } catch (NonUniqueMetadataException e) {
+                log.error("The eperson MetadataField with MetadataName " + metadataName +" already exists",e);
+                return false;
+            }
 
-			log.info("Auto created the eperson column for additional metadata: '"+metadataName+"'");
+
+            log.info("Auto created the eperson metadataField: '" + metadataName + "'");
 			return true;
 
-		} catch (SQLException sqle) {
-			log.error("Unable to auto-create the eperson column for additional metadata '"+metadataName+"', because of error: ",sqle);
+        }
 			return false;
-		} finally {
-			if (dbConnection != null)
-				dbConnection.close();
-		}
 	}
 
 
@@ -1067,16 +1048,44 @@ public class ShibAuthentication implements AuthenticationMethod
 	 * This method will not interpret the header value in any way.
 	 * 
 	 * 
-	 * @param request The HTTP request to look for headers values on.
-	 * @param name The name of the header
-	 * @return The value of the header requested, or null if none found.
+	 * @param request The HTTP request to look for values in.
+	 * @param name The name of the attribute or header
+	 * @return The value of the attribute or header requested, or null if none found.
 	 */
-	private String findHeader(HttpServletRequest request, String name) {
-		String value = request.getHeader(name);
-		if (value == null)
+	private String findAttribute(HttpServletRequest request, String name) {
+		if ( name == null ) {
+			return null;
+		}
+		// First try to get the value from the attribute
+		String value = (String) request.getAttribute(name);
+		if (StringUtils.isEmpty(value))
+			value = (String) request.getAttribute(name.toLowerCase());
+		if (StringUtils.isEmpty(value))
+			value = (String) request.getAttribute(name.toUpperCase());
+
+		// Second try to get the value from the header
+		if (StringUtils.isEmpty(value))
+		    value = request.getHeader(name);
+		if (StringUtils.isEmpty(value))
 			value = request.getHeader(name.toLowerCase());
-		if (value == null)
+		if (StringUtils.isEmpty(value))
 			value = request.getHeader(name.toUpperCase());
+                
+                boolean reconvertAttributes = 
+                        ConfigurationManager.getBooleanProperty(
+                            "authentication-shibboleth",
+                            "reconvert.attributes",
+                            false);
+                
+                if (!StringUtils.isEmpty(value) && reconvertAttributes)
+                {
+                    try {
+                        value = new String(value.getBytes("ISO-8859-1"), "UTF-8");
+                    } catch (UnsupportedEncodingException ex) {
+                        log.warn("Failed to reconvert shibboleth attribute ("
+                                + name + ").", ex);
+                    }
+                }
 		
 		return value;
 	}
@@ -1089,7 +1098,7 @@ public class ShibAuthentication implements AuthenticationMethod
 	 * 
 	 * Shibboleth attributes may contain multiple values separated by a
 	 * semicolon. This method will return the first value in the attribute. If
-	 * you need multiple values use findMultipleHeaders instead.
+	 * you need multiple values use findMultipleAttributes instead.
 	 * 
 	 * If no attribute is found then null is returned.
 	 * 
@@ -1097,9 +1106,12 @@ public class ShibAuthentication implements AuthenticationMethod
 	 * @param name The name of the header
 	 * @return The value of the header requested, or null if none found.
 	 */
-	private String findSingleHeader(HttpServletRequest request, String name) {
+	private String findSingleAttribute(HttpServletRequest request, String name) {
+		if ( name == null) {
+			return null;
+		}
 
-		String value = findHeader(request, name);
+		String value = findAttribute(request, name);
 
 
 		if (value != null) {
@@ -1125,8 +1137,8 @@ public class ShibAuthentication implements AuthenticationMethod
 	}
 
 	/**
-	 * Find a particular Shibboleth header value and return the all values.
-	 * The header name uses a bit of fuzzy logic, so it will first try case
+	 * Find a particular Shibboleth hattributeeader value and return the values.
+	 * The attribute name uses a bit of fuzzy logic, so it will first try case
 	 * sensitive, then it will try lowercase, and finally it will try uppercase.
 	 * 
 	 * Shibboleth attributes may contain multiple values separated by a
@@ -1136,11 +1148,11 @@ public class ShibAuthentication implements AuthenticationMethod
 	 * If no attributes are found then null is returned.
 	 * 
 	 * @param request The HTTP request to look for headers values on.
-	 * @param name The name of the header
+	 * @param name The name of the attribute
 	 * @return The list of values found, or null if none found.
 	 */
-	private List<String> findMultipleHeaders(HttpServletRequest request, String name) {
-		String values = findHeader(request, name);
+	private List<String> findMultipleAttributes(HttpServletRequest request, String name) {
+		String values = findAttribute(request, name);
 
 		if (values == null)
 			return null;

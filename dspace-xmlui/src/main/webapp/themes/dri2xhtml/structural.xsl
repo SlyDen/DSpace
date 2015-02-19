@@ -49,6 +49,19 @@
     <xsl:variable name="theme-path" select="concat($context-path,'/themes/',/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='theme'][@qualifier='path'])"/>
 
     <!--
+        Full URI of the current page. Composed of scheme, server name and port and request URI.
+    -->
+    <xsl:variable name="current-uri">
+        <xsl:value-of select="/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='request'][@qualifier='scheme']"/>
+        <xsl:text>://</xsl:text>
+        <xsl:value-of select="/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='request'][@qualifier='serverName']"/>
+        <xsl:text>:</xsl:text>
+        <xsl:value-of select="/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='request'][@qualifier='serverPort']"/>
+        <xsl:text>/</xsl:text>
+        <xsl:value-of select="/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='request'][@qualifier='URI']"/>
+    </xsl:variable>
+
+    <!--
         Requested Page URI. Some functions may alter behavior of processing depending if URI matches a pattern.
         Specifically, adding a static page will need to override the DRI, to directly add content.
     -->
@@ -148,7 +161,7 @@
                 </xsl:if>
               </xsl:attribute>
             </meta>
-            <!-- Add stylsheets -->
+            <!-- Add stylesheets -->
             <xsl:for-each select="/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='stylesheet']">
                 <link rel="stylesheet" type="text/css">
                     <xsl:attribute name="media">
@@ -373,6 +386,9 @@
                                 <i18n:text>xmlui.dri2xhtml.structural.logout</i18n:text>
                             </a>
                         </p>
+                        <p>
+                            <xsl:call-template name="languageSelection" />
+                        </p>
                     </div>
                 </xsl:when>
                 <xsl:otherwise>
@@ -385,6 +401,9 @@
                                 </xsl:attribute>
                                 <i18n:text>xmlui.dri2xhtml.structural.login</i18n:text>
                             </a>
+                        </p>
+                        <p>
+                            <xsl:call-template name="languageSelection" />
                         </p>
                     </div>
                 </xsl:otherwise>
@@ -872,7 +891,7 @@
             <xsl:call-template name="standardAttributes">
                 <xsl:with-param name="class">ds-table</xsl:with-param>
             </xsl:call-template>
-            <!-- rows and cols atributes are not allowed in strict
+            <!-- rows and cols attributes are not allowed in strict
             <xsl:attribute name="rows"><xsl:value-of select="@rows"/></xsl:attribute>
             <xsl:attribute name="cols"><xsl:value-of select="@cols"/></xsl:attribute>
 
@@ -1721,6 +1740,10 @@
                 <xsl:attribute name="name"><xsl:value-of select="@n"/></xsl:attribute>
             </xsl:if>
 
+            <xsl:if test="@onclick">
+                <xsl:attribute name="onclick"><xsl:value-of select="@onclick"/></xsl:attribute>
+            </xsl:if>
+
             <xsl:apply-templates />
         </a>
     </xsl:template>
@@ -2549,7 +2572,7 @@
     
     
     
-    <!-- Help elementns are turning into tooltips. There might be a better way to do this -->
+    <!-- Help elements are turning into tooltips. There might be a better way to do this -->
     <xsl:template match="dri:help">
         <xsl:attribute name="title"><xsl:value-of select="."/></xsl:attribute>
         <xsl:if test="i18n:text">
@@ -3797,6 +3820,25 @@
         <!--Generates thumbnails (if present)-->
         <xsl:apply-templates select="$metsDoc/mets:METS/mets:fileSec" mode="artifact-preview"/>
 
+    </xsl:template>
+    
+    <!-- Display language selection if more than 1 language is supported -->
+    <xsl:template name="languageSelection">
+        <xsl:if test="count(/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='page'][@qualifier='supportedLocale']) &gt; 1">
+            <div id="ds-language-selection">
+                <xsl:for-each select="/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='page'][@qualifier='supportedLocale']">
+                    <xsl:variable name="locale" select="."/>
+                    <a>
+                        <xsl:attribute name="href">
+                            <xsl:value-of select="$current-uri"/>
+                            <xsl:text>?locale-attribute=</xsl:text>
+                            <xsl:value-of select="$locale"/>
+                        </xsl:attribute>
+                        <xsl:value-of select="/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='supportedLocale'][@qualifier=$locale]"/>
+                    </a>
+                </xsl:for-each>
+            </div>
+        </xsl:if>
     </xsl:template>
 
 </xsl:stylesheet>

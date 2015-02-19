@@ -16,7 +16,7 @@
 <%@ page import="org.dspace.app.bulkedit.BulkEditChange" %>
 <%@ page import="java.util.ArrayList" %>
 <%@ page import="org.dspace.content.Item" %>
-<%@ page import="org.dspace.content.DCValue" %>
+<%@ page import="org.dspace.content.Metadatum" %>
 <%@ page import="org.dspace.content.Collection" %>
 <%@ page import="java.util.List" %>
 
@@ -36,7 +36,7 @@
     boolean allow = ((Boolean)request.getAttribute("allow")).booleanValue();
 %>
 
-<dspace:layout titlekey="jsp.dspace-admin.metadataimport.title"
+<dspace:layout style="submission" titlekey="jsp.dspace-admin.metadataimport.title"
                navbar="admin"
                locbar="link"
                parenttitlekey="jsp.administer"
@@ -64,7 +64,7 @@
     }
 %>
 
-    <table class="miscTable">
+    <table class="table">
 
         <%
             // Display the changes
@@ -72,8 +72,8 @@
             for (BulkEditChange change : changes)
             {
                 // Get the changes
-                List<DCValue> adds = change.getAdds();
-                List<DCValue> removes = change.getRemoves();
+                List<Metadatum> adds = change.getAdds();
+                List<Metadatum> removes = change.getRemoves();
                 List<Collection> newCollections = change.getNewMappedCollections();
                 List<Collection> oldCollections = change.getOldMappedCollections();
                 boolean first = false;
@@ -256,7 +256,7 @@
                 }
 
                 // Show additions
-                for (DCValue dcv : adds)
+                for (Metadatum dcv : adds)
                 {
                     String md = dcv.schema + "." + dcv.element;
                     if (dcv.qualifier != null)
@@ -286,7 +286,7 @@
                 }
 
                 // Show removals
-                for (DCValue dcv : removes)
+                for (Metadatum dcv : removes)
                 {
                     String md = dcv.schema + "." + dcv.element;
                     if (dcv.qualifier != null)
@@ -326,17 +326,16 @@
         <p align="center">
             <form method="post" action="">
                 <input type="hidden" name="type" value="confirm" />
-                <input type="submit" name="submit" value="<fmt:message key="jsp.dspace-admin.metadataimport.apply"/>" />
+                <input class="btn btn-default" type="submit" name="submit" value="<fmt:message key="jsp.dspace-admin.metadataimport.apply"/>" />
             </form>
             <form method="post" action="">
                 <input type="hidden" name="type" value="cancel" />
-                <input type="submit" name="submit" value="<fmt:message key="jsp.dspace-admin.general.cancel"/>" />
+                <input class="btn btn-default" type="submit" name="submit" value="<fmt:message key="jsp.dspace-admin.general.cancel"/>" />
             </form>
         </p>
         <%
             }
         %>
-
-    </form>
+    
     
 </dspace:layout>

@@ -7,24 +7,22 @@
  */
 package org.dspace.statistics;
 
-import au.com.bytecode.opencsv.CSVParser;
 import au.com.bytecode.opencsv.CSVReader;
 import au.com.bytecode.opencsv.CSVWriter;
 import com.maxmind.geoip.Location;
 import com.maxmind.geoip.LookupService;
-
-import java.io.*;
-
-import org.apache.commons.httpclient.HttpClient;
-import org.apache.commons.httpclient.methods.GetMethod;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang.ArrayUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang.time.DateFormatUtils;
+import org.apache.http.HttpResponse;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.impl.client.DefaultHttpClient;
 import org.apache.log4j.Logger;
 import org.apache.solr.client.solrj.SolrQuery;
+import org.apache.solr.client.solrj.SolrServer;
 import org.apache.solr.client.solrj.SolrServerException;
-import org.apache.solr.client.solrj.impl.CommonsHttpSolrServer;
+import org.apache.solr.client.solrj.impl.HttpSolrServer;
 import org.apache.solr.client.solrj.request.AbstractUpdateRequest;
 import org.apache.solr.client.solrj.request.ContentStreamUpdateRequest;
 import org.apache.solr.client.solrj.request.CoreAdminRequest;
@@ -33,11 +31,10 @@ import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.client.solrj.response.RangeFacet;
 import org.apache.solr.client.solrj.util.ClientUtils;
 import org.apache.solr.common.SolrDocument;
+import org.apache.solr.common.SolrDocumentList;
 import org.apache.solr.common.SolrInputDocument;
-import org.apache.solr.common.params.CommonParams;
-import org.apache.solr.common.params.FacetParams;
-import org.apache.solr.common.params.MapSolrParams;
-import org.apache.solr.common.params.ShardParams;
+import org.apache.solr.common.params.*;
+import org.apache.solr.common.util.JavaBinCodec;
 import org.dspace.content.*;
 import org.dspace.content.Collection;
 import org.dspace.core.ConfigurationManager;
@@ -51,8 +48,10 @@ import org.dspace.statistics.util.SpiderDetector;
 import org.dspace.usage.UsageWorkflowEvent;
 
 import javax.servlet.http.HttpServletRequest;
+import java.io.*;
 import java.net.URLEncoder;
 import java.sql.SQLException;
+import java.text.DateFormat;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.*;
@@ -70,15 +69,13 @@ public class SolrLogger
 {
     private static final Logger log = Logger.getLogger(SolrLogger.class);
 	
-    private static final CommonsHttpSolrServer solr;
+    private static final HttpSolrServer solr;
 
     public static final String DATE_FORMAT_8601 = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'";
 
     public static final String DATE_FORMAT_DCDATE = "yyyy-MM-dd'T'HH:mm:ss'Z'";
 
     private static final LookupService locationService;
-
-    private static Map<String, String> metadataStorageInfo;
 
     private static final boolean useProxies;
 
@@ -105,13 +102,13 @@ public class SolrLogger
         log.info("solr-statistics.server:" + ConfigurationManager.getProperty("solr-statistics", "server"));
         log.info("usage-statistics.dbfile:" + ConfigurationManager.getProperty("usage-statistics", "dbfile"));
     	
-        CommonsHttpSolrServer server = null;
+        HttpSolrServer server = null;
         
         if (ConfigurationManager.getProperty("solr-statistics", "server") != null)
         {
             try
             {
-                server = new CommonsHttpSolrServer(ConfigurationManager.getProperty("solr-statistics", "server"));
+                server = new HttpSolrServer(ConfigurationManager.getProperty("solr-statistics", "server"));
                 SolrQuery solrQuery = new SolrQuery()
                         .setQuery("type:2 AND id:1");
                 server.query(solrQuery);
@@ -243,6 +240,39 @@ public class SolrLogger
         	log.error(e.getMessage(), e);
         }
     }
+    
+	public static void postView(DSpaceObject dspaceObject,
+			String ip, String userAgent, String xforwardedfor, EPerson currentUser) {
+		if (solr == null || locationService == null) {
+			return;
+		}
+
+		try {
+			SolrInputDocument doc1 = getCommonSolrDoc(dspaceObject, ip, userAgent, xforwardedfor,
+					currentUser);
+			if (doc1 == null)
+				return;
+			if (dspaceObject instanceof Bitstream) {
+				Bitstream bit = (Bitstream) dspaceObject;
+				Bundle[] bundles = bit.getBundles();
+				for (Bundle bundle : bundles) {
+					doc1.addField("bundleName", bundle.getName());
+				}
+			}
+
+			doc1.addField("statistics_type", StatisticsType.VIEW.text());
+
+			solr.add(doc1);
+			// commits are executed automatically using the solr autocommit
+			// solr.commit(false, false);
+
+		} catch (RuntimeException re) {
+			throw re;
+		} catch (Exception e) {
+			log.error(e.getMessage(), e);
+		}
+	}
+    
 
     /**
      * Returns a solr input document containing common information about the statistics
@@ -297,7 +327,10 @@ public class SolrLogger
                 log.error("Failed DNS Lookup for IP:" + ip);
                 log.debug(e.getMessage(),e);
             }
-
+		    if(request.getHeader("User-Agent") != null)
+		    {
+		        doc1.addField("userAgent", request.getHeader("User-Agent"));
+		    }
             // Save the location information if valid, save the event without
             // location information if not valid
             if(locationService != null)
@@ -323,10 +356,7 @@ public class SolrLogger
                     doc1.addField("longitude", location.longitude);
                     doc1.addField("isBot",isSpiderBot);
 
-                    if(request.getHeader("User-Agent") != null)
-                    {
-                        doc1.addField("userAgent", request.getHeader("User-Agent"));
-                    }
+
                 }
             }
         }
@@ -346,6 +376,92 @@ public class SolrLogger
         return doc1;
     }
 
+    private static SolrInputDocument getCommonSolrDoc(DSpaceObject dspaceObject, String ip, String userAgent, String xforwardedfor, EPerson currentUser) throws SQLException {
+        boolean isSpiderBot = SpiderDetector.isSpider(ip);
+        if(isSpiderBot &&
+                !ConfigurationManager.getBooleanProperty("usage-statistics", "logBots", true))
+        {
+            return null;
+        }
+
+        SolrInputDocument doc1 = new SolrInputDocument();
+        // Save our basic info that we already have
+
+
+            if (isUseProxies() && xforwardedfor != null) {
+                /* This header is a comma delimited list */
+                for (String xfip : xforwardedfor.split(",")) {
+                    /* proxy itself will sometime populate this header with the same value in
+                    remote address. ordering in spec is vague, we'll just take the last
+                    not equal to the proxy
+                    */
+                    if (!xforwardedfor.contains(ip)) {
+                        ip = xfip.trim();
+                    }
+                }
+
+            doc1.addField("ip", ip);
+
+            try
+            {
+                String dns = DnsLookup.reverseDns(ip);
+                doc1.addField("dns", dns.toLowerCase());
+            }
+            catch (Exception e)
+            {
+                log.error("Failed DNS Lookup for IP:" + ip);
+                log.debug(e.getMessage(),e);
+            }
+		    if(userAgent != null)
+		    {
+		        doc1.addField("userAgent", userAgent);
+		    }
+            // Save the location information if valid, save the event without
+            // location information if not valid
+            if(locationService != null)
+            {
+                Location location = locationService.getLocation(ip);
+                if (location != null
+                        && !("--".equals(location.countryCode)
+                        && location.latitude == -180 && location.longitude == -180))
+                {
+                    try
+                    {
+                        doc1.addField("continent", LocationUtils
+                                .getContinentCode(location.countryCode));
+                    }
+                    catch (Exception e)
+                    {
+                        System.out
+                                .println("COUNTRY ERROR: " + location.countryCode);
+                    }
+                    doc1.addField("countryCode", location.countryCode);
+                    doc1.addField("city", location.city);
+                    doc1.addField("latitude", location.latitude);
+                    doc1.addField("longitude", location.longitude);
+                    doc1.addField("isBot",isSpiderBot);
+
+
+                }
+            }
+        }
+
+        if(dspaceObject != null){
+            doc1.addField("id", dspaceObject.getID());
+            doc1.addField("type", dspaceObject.getType());
+            storeParents(doc1, dspaceObject);
+        }
+        // Save the current time
+        doc1.addField("time", DateFormatUtils.format(new Date(), DATE_FORMAT_8601));
+        if (currentUser != null)
+        {
+            doc1.addField("epersonid", currentUser.getID());
+        }
+
+        return doc1;
+    }
+
+    
     public static void postSearch(DSpaceObject resultObject, HttpServletRequest request, EPerson currentUser,
                                  List<String> queries, int rpp, String sortBy, String order, int page, DSpaceObject scope) {
         try
@@ -365,8 +481,8 @@ public class SolrLogger
             }
             //Store the scope
             if(scope != null){
-                solrDoc.addField("scopeId", scope.getType());
-                solrDoc.addField("scopeType", scope.getID());
+                solrDoc.addField("scopeId", scope.getID());
+                solrDoc.addField("scopeType", scope.getType());
             }
 
             if(rpp != -1){
@@ -442,11 +558,6 @@ public class SolrLogger
         	log.error(e.getMessage(), e);
         }
 
-    }
-
-    public static Map<String, String> getMetadataStorageInfo()
-    {
-        return metadataStorageInfo;
     }
 
     /**
@@ -557,18 +668,6 @@ public class SolrLogger
 
             // We have at least one document good
             SolrDocument document = response.getResults().get(0);
-            for (Object storedField : metadataStorageInfo.keySet())
-            {
-                // For each of these fields that are stored we are to create a
-                // list of the values it holds now
-                java.util.Collection collection = document
-                        .getFieldValues((String) storedField);
-                List<String> storedVals = new ArrayList<String>();
-                storedVals.addAll(collection);
-                // Now add it to our hashmap
-                currentValsStored.put((String) storedField, storedVals);
-            }
-
             // System.out.println("HERE");
             // Get the info we need
         }
@@ -879,7 +978,7 @@ public class SolrLogger
      */
     public static ObjectCount[] queryFacetDate(String query,
             String filterQuery, int max, String dateType, String dateStart,
-            String dateEnd, boolean showTotal) throws SolrServerException
+            String dateEnd, boolean showTotal, Context context) throws SolrServerException
     {
         QueryResponse queryResponse = query(query, filterQuery, null, 0, max,
                 dateType, dateStart, dateEnd, null, null, false);
@@ -899,7 +998,7 @@ public class SolrLogger
             FacetField.Count dateCount = dateFacet.getValues().get(i);
             result[i] = new ObjectCount();
             result[i].setCount(dateCount.getCount());
-            result[i].setValue(getDateView(dateCount.getName(), dateType));
+            result[i].setValue(getDateView(dateCount.getName(), dateType, context));
         }
         if (showTotal)
         {
@@ -932,7 +1031,7 @@ public class SolrLogger
         return objCount;
     }
 
-    private static String getDateView(String name, String type)
+    private static String getDateView(String name, String type, Context context)
     {
         if (name != null && name.matches("^[0-9]{4}\\-[0-9]{2}.*"))
         {
@@ -947,7 +1046,7 @@ public class SolrLogger
             Date date = null;
             try
             {
-                SimpleDateFormat format = new SimpleDateFormat(DATE_FORMAT_8601);
+                SimpleDateFormat format = new SimpleDateFormat(DATE_FORMAT_8601, context.getCurrentLocale());
                 date = format.parse(name);
             }
             catch (ParseException e)
@@ -957,7 +1056,7 @@ public class SolrLogger
                     // We should use the dcdate (the dcdate is used when
                     // generating random data)
                     SimpleDateFormat format = new SimpleDateFormat(
-                            DATE_FORMAT_DCDATE);
+                            DATE_FORMAT_DCDATE, context.getCurrentLocale());
                     date = format.parse(name);
                 }
                 catch (ParseException e1)
@@ -981,7 +1080,7 @@ public class SolrLogger
                 dateformatString = "yyyy";
             }
             SimpleDateFormat simpleFormat = new SimpleDateFormat(
-                    dateformatString);
+                    dateformatString, context.getCurrentLocale());
             if (date != null)
             {
                 name = simpleFormat.format(date);
@@ -1158,7 +1257,7 @@ public class SolrLogger
 
     public static void shardSolrIndex() throws IOException, SolrServerException {
         /*
-        Start by faceting by year so we can include each year in a seperate core !
+        Start by faceting by year so we can include each year in a separate core !
          */
         SolrQuery yearRangeQuery = new SolrQuery();
         yearRangeQuery.setQuery("*:*");
@@ -1213,7 +1312,7 @@ public class SolrLogger
 
             //Start by creating a new core
             String coreName = "statistics-" + dcStart.getYear();
-            CommonsHttpSolrServer statisticsYearServer = createCore(solr, coreName);
+            HttpSolrServer statisticsYearServer = createCore(solr, coreName);
 
             System.out.println("Moving: " + totalRecords + " into core " + coreName);
             log.info("Moving: " + totalRecords + " records into core " + coreName);
@@ -1223,9 +1322,9 @@ public class SolrLogger
                 String solrRequestUrl = solr.getBaseURL() + "/select";
                 solrRequestUrl = generateURL(solrRequestUrl, yearQueryParams);
 
-                GetMethod get = new GetMethod(solrRequestUrl);
-                new HttpClient().executeMethod(get);
-                InputStream csvInputstream = get.getResponseBodyAsStream();
+                HttpGet get = new HttpGet(solrRequestUrl);
+                HttpResponse response = new DefaultHttpClient().execute(get);
+                InputStream csvInputstream = response.getEntity().getContent();
                 //Write the csv ouput to a file !
                 File csvFile = new File(tempDirectory.getPath() + File.separatorChar + "temp." + dcStart.getYear() + "." + i + ".csv");
                 FileUtils.copyInputStreamToFile(csvInputstream, csvFile);
@@ -1240,7 +1339,7 @@ public class SolrLogger
                 ContentStreamUpdateRequest contentStreamUpdateRequest = new ContentStreamUpdateRequest("/update/csv");
                 contentStreamUpdateRequest.setParam("stream.contentType", "text/plain;charset=utf-8");
                 contentStreamUpdateRequest.setAction(AbstractUpdateRequest.ACTION.COMMIT, true, true);
-                contentStreamUpdateRequest.addFile(tempCsv);
+                contentStreamUpdateRequest.addFile(tempCsv, "text/plain;charset=utf-8");
 
                 statisticsYearServer.request(contentStreamUpdateRequest);
             }
@@ -1257,17 +1356,17 @@ public class SolrLogger
         FileUtils.deleteDirectory(tempDirectory);
     }
 
-    private static CommonsHttpSolrServer createCore(CommonsHttpSolrServer solr, String coreName) throws IOException, SolrServerException {
+    private static HttpSolrServer createCore(HttpSolrServer solr, String coreName) throws IOException, SolrServerException {
         String solrDir = ConfigurationManager.getProperty("dspace.dir") + File.separator + "solr" +File.separator;
         String baseSolrUrl = solr.getBaseURL().replace("statistics", "");
         CoreAdminRequest.Create create = new CoreAdminRequest.Create();
         create.setCoreName(coreName);
         create.setInstanceDir("statistics");
         create.setDataDir(solrDir + coreName + File.separator + "data");
-        CommonsHttpSolrServer solrServer = new CommonsHttpSolrServer(baseSolrUrl);
+        HttpSolrServer solrServer = new HttpSolrServer(baseSolrUrl);
         create.process(solrServer);
         log.info("Created core with name: " + coreName);
-        return new CommonsHttpSolrServer(baseSolrUrl + "/" + coreName);
+        return new HttpSolrServer(baseSolrUrl + "/" + coreName);
     }
 
 
@@ -1299,10 +1398,10 @@ public class SolrLogger
                 String solrRequestUrl = solr.getBaseURL() + "/select";
                 solrRequestUrl = generateURL(solrRequestUrl, params);
 
-                GetMethod get = new GetMethod(solrRequestUrl);
-                new HttpClient().executeMethod(get);
+                HttpGet get = new HttpGet(solrRequestUrl);
+                HttpResponse response = new DefaultHttpClient().execute(get);
 
-                InputStream  csvOutput = get.getResponseBodyAsStream();
+                InputStream  csvOutput = response.getEntity().getContent();
                 Reader csvReader = new InputStreamReader(csvOutput);
                 List<String[]> rows = new CSVReader(csvReader).readAll();
                 String[][] csvParsed = rows.toArray(new String[rows.size()][]);
@@ -1378,7 +1477,7 @@ public class SolrLogger
                 ContentStreamUpdateRequest contentStreamUpdateRequest = new ContentStreamUpdateRequest("/update/csv");
                 contentStreamUpdateRequest.setParam("stream.contentType", "text/plain;charset=utf-8");
                 contentStreamUpdateRequest.setAction(AbstractUpdateRequest.ACTION.COMMIT, true, true);
-                contentStreamUpdateRequest.addFile(tempCsv);
+                contentStreamUpdateRequest.addFile(tempCsv, "text/plain;charset=utf-8");
 
                 solr.request(contentStreamUpdateRequest);
             }
@@ -1394,6 +1493,83 @@ public class SolrLogger
             throw e;
         } finally {
             context.abort();
+        }
+    }
+
+    /**
+     * Export all SOLR usage statistics for viewing/downloading content to a flat text file.
+     * The file goes to a series
+     *
+     * @throws Exception
+     */
+    public static void exportHits() throws Exception {
+        Context context = new Context();
+
+        File tempDirectory = new File(ConfigurationManager.getProperty("dspace.dir") + File.separator + "temp" + File.separator);
+        tempDirectory.mkdirs();
+
+        try {
+            //First of all retrieve the total number of records to be updated
+            SolrQuery query = new SolrQuery();
+            query.setQuery("*:*");
+
+            ModifiableSolrParams solrParams = new ModifiableSolrParams();
+            solrParams.set(CommonParams.Q, "statistics_type:view OR (*:* AND -statistics_type:*)");
+            solrParams.set(CommonParams.WT, "javabin");
+            solrParams.set(CommonParams.ROWS, String.valueOf(10000));
+
+            addAdditionalSolrYearCores(query);
+            long totalRecords = solr.query(query).getResults().getNumFound();
+            System.out.println("There are " + totalRecords + " usage events in SOLR for download/view.");
+
+            for(int i = 0; i < totalRecords; i+=10000){
+                solrParams.set(CommonParams.START, String.valueOf(i));
+                QueryResponse queryResponse = solr.query(solrParams);
+                SolrDocumentList docs = queryResponse.getResults();
+
+                File exportOutput = new File(tempDirectory.getPath() + File.separatorChar + "usagestats_" + i + ".csv");
+                exportOutput.delete();
+
+                //export docs
+                addDocumentsToFile(context, docs, exportOutput);
+                System.out.println("Export hits [" + i + " - " + String.valueOf(i+9999) + "] to " + exportOutput.getCanonicalPath());
+            }
+        } catch (Exception e) {
+            log.error("Error while exporting SOLR data", e);
+            throw e;
+        } finally {
+            context.abort();
+        }
+    }
+
+    private static void addDocumentsToFile(Context context, SolrDocumentList docs, File exportOutput) throws SQLException, ParseException, IOException {
+        for(SolrDocument doc : docs) {
+            String ip = doc.get("ip").toString();
+            if(ip.equals("::1")) {
+                ip = "127.0.0.1";
+            }
+
+            String id = doc.get("id").toString();
+            String type = doc.get("type").toString();
+            String time = doc.get("time").toString();
+
+            //20140527162409835,view_bitstream,1292,2014-05-27T16:24:09,anonymous,127.0.0.1
+            DSpaceObject dso = DSpaceObject.find(context, Integer.parseInt(type), Integer.parseInt(id));
+            if(dso == null) {
+                log.debug("Document no longer exists in DB. type:" + type + " id:" + id);
+                continue;
+            }
+
+            //InputFormat: Mon May 19 07:21:27 EDT 2014
+            DateFormat inputDateFormat = new SimpleDateFormat("EEE MMM dd HH:mm:ss z yyyy");
+            Date solrDate = inputDateFormat.parse(time);
+
+            //OutputFormat: 2014-05-27T16:24:09
+            DateFormat outputDateFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss");
+
+            String out = time + "," + "view_" + dso.getTypeText().toLowerCase() + "," + id + ","  + outputDateFormat.format(solrDate) + ",anonymous," + ip + "\n";
+            FileUtils.writeStringToFile(exportOutput, out, true);
+
         }
     }
 

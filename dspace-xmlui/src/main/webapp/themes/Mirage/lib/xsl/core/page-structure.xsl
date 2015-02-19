@@ -167,7 +167,7 @@
                 </xsl:if>
               </xsl:attribute>
             </meta>
-            <!-- Add stylsheets -->
+            <!-- Add stylesheets -->
             <xsl:for-each select="/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='stylesheet']">
                 <link rel="stylesheet" type="text/css">
                     <xsl:attribute name="media">
@@ -289,7 +289,10 @@
                                 <xsl:text>About This Repository</xsl:text>
                         </xsl:when>
                         <xsl:when test="not($page_title)">
-                                <xsl:text>  </xsl:text>
+                            <i18n:text>xmlui.dri2xhtml.METS-1.0.no-title</i18n:text>
+                        </xsl:when>
+                        <xsl:when test="$page_title = ''">
+                            <i18n:text>xmlui.dri2xhtml.METS-1.0.no-title</i18n:text>
                         </xsl:when>
                         <xsl:otherwise>
                                 <xsl:copy-of select="$page_title/node()" />
@@ -308,6 +311,24 @@
                 <meta name="{@element}" content="{.}"></meta>
             </xsl:for-each>
 
+            <!-- Add MathJAX JS library to render scientific formulas-->
+            <xsl:if test="confman:getProperty('webui.browse.render-scientific-formulas') = 'true'">
+                <script type="text/x-mathjax-config">
+                    MathJax.Hub.Config({
+                      tex2jax: {
+                        inlineMath: [['$','$'], ['\\(','\\)']],
+                        ignoreClass: "detail-field-data|detailtable|exception"
+                      },
+                      TeX: {
+                        Macros: {
+                          AA: '{\\mathring A}'
+                        }
+                      }
+                    });
+                </script>
+                <script type="text/javascript" src="//cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML">&#160;</script>
+            </xsl:if>
+
         </head>
     </xsl:template>
 
@@ -324,7 +345,9 @@
                         <xsl:text>/</xsl:text>
                     </xsl:attribute>
                     <span id="ds-header-logo">&#160;</span>
-                    <span id="ds-header-logo-text">mirage</span>
+                    <span id="ds-header-logo-text">
+                       <i18n:text>xmlui.dri2xhtml.structural.head-subtitle</i18n:text>
+                    </span>
                 </a>
                 <h1 class="pagetitle visuallyhidden">
                     <xsl:choose>
@@ -339,10 +362,6 @@
                     </xsl:choose>
 
                 </h1>
-                <h2 class="static-pagetitle visuallyhidden">
-                    <i18n:text>xmlui.dri2xhtml.structural.head-subtitle</i18n:text>
-                </h2>
-
 
                 <xsl:choose>
                     <xsl:when test="/dri:document/dri:meta/dri:userMeta/@authenticated = 'yes'">
@@ -385,11 +404,12 @@
                         </div>
                     </xsl:otherwise>
                 </xsl:choose>
-
+                
+                <xsl:call-template name="languageSelection" />
+                
             </div>
         </div>
     </xsl:template>
-
 
     <!-- The header (distinct from the HTML head element) contains the title, subtitle, login box and various
         placeholders for header images -->
@@ -483,17 +503,10 @@
                 alt="{$ccLicenseName}"
                 title="{$ccLicenseName}"
                 >
-                <img>
-                     <xsl:attribute name="src">
-                        <xsl:value-of select="concat($theme-path,'/images/cc-ship.gif')"/>
-                     </xsl:attribute>
-                     <xsl:attribute name="alt">
-                         <xsl:value-of select="$ccLicenseName"/>
-                     </xsl:attribute>
-                     <xsl:attribute name="style">
-                         <xsl:text>float:left; margin:0em 1em 0em 0em; border:none;</xsl:text>
-                     </xsl:attribute>
-                </img>
+                <xsl:call-template name="cc-logo">
+                    <xsl:with-param name="ccLicenseName" select="$ccLicenseName"/>
+                    <xsl:with-param name="ccLicenseUri" select="$ccLicenseUri"/>
+                </xsl:call-template>
             </a>
             <span>
                 <xsl:attribute name="style">
@@ -504,6 +517,66 @@
             </span>
         </div>
         </xsl:if>
+    </xsl:template>
+
+    <xsl:template name="cc-logo">
+        <xsl:param name="ccLicenseName"/>
+        <xsl:param name="ccLicenseUri"/>
+        <xsl:variable name="ccLogo">
+             <xsl:choose>
+                  <xsl:when test="starts-with($ccLicenseUri,
+                                           'http://creativecommons.org/licenses/by/')">
+                       <xsl:value-of select="'cc-by.png'" />
+                  </xsl:when>
+                  <xsl:when test="starts-with($ccLicenseUri,
+                                           'http://creativecommons.org/licenses/by-sa/')">
+                       <xsl:value-of select="'cc-by-sa.png'" />
+                  </xsl:when>
+                  <xsl:when test="starts-with($ccLicenseUri,
+                                           'http://creativecommons.org/licenses/by-nd/')">
+                       <xsl:value-of select="'cc-by-nd.png'" />
+                  </xsl:when>
+                  <xsl:when test="starts-with($ccLicenseUri,
+                                           'http://creativecommons.org/licenses/by-nc/')">
+                       <xsl:value-of select="'cc-by-nc.png'" />
+                  </xsl:when>
+                  <xsl:when test="starts-with($ccLicenseUri,
+                                           'http://creativecommons.org/licenses/by-nc-sa/')">
+                       <xsl:value-of select="'cc-by-nc-sa.png'" />
+                  </xsl:when>
+                  <xsl:when test="starts-with($ccLicenseUri,
+                                           'http://creativecommons.org/licenses/by-nc-nd/')">
+                       <xsl:value-of select="'cc-by-nc-nd.png'" />
+                  </xsl:when>
+                  <xsl:when test="starts-with($ccLicenseUri,
+                                           'http://creativecommons.org/publicdomain/zero/')">
+                       <xsl:value-of select="'cc-zero.png'" />
+                  </xsl:when>
+                  <xsl:when test="starts-with($ccLicenseUri,
+                                           'http://creativecommons.org/publicdomain/mark/')">
+                       <xsl:value-of select="'cc-mark.png'" />
+                  </xsl:when>
+                  <xsl:otherwise>
+                       <xsl:value-of select="'cc-generic.png'" />
+                  </xsl:otherwise>
+             </xsl:choose>
+        </xsl:variable>
+        <xsl:variable name="ccLogoImgSrc">
+            <xsl:value-of select="$theme-path"/>
+            <xsl:text>/images/creativecommons/</xsl:text>
+            <xsl:value-of select="$ccLogo"/>
+        </xsl:variable>
+        <img>
+             <xsl:attribute name="src">
+                <xsl:value-of select="$ccLogoImgSrc"/>
+             </xsl:attribute>
+             <xsl:attribute name="alt">
+                 <xsl:value-of select="$ccLicenseName"/>
+             </xsl:attribute>
+             <xsl:attribute name="style">
+                 <xsl:text>float:left; margin:0em 1em 0em 0em; border:none;</xsl:text>
+             </xsl:attribute>
+        </img>
     </xsl:template>
 
     <!-- Like the header, the footer contains various miscellaneous text, links, and image placeholders -->
@@ -613,17 +686,7 @@
             <xsl:text>1.6.2</xsl:text>
         </xsl:variable>
 
-        <xsl:variable name="protocol">
-            <xsl:choose>
-                <xsl:when test="starts-with(confman:getProperty('dspace.baseUrl'), 'https://')">
-                    <xsl:text>https://</xsl:text>
-                </xsl:when>
-                <xsl:otherwise>
-                    <xsl:text>http://</xsl:text>
-                </xsl:otherwise>
-            </xsl:choose>
-        </xsl:variable>
-        <script type="text/javascript" src="{concat($protocol, 'ajax.googleapis.com/ajax/libs/jquery/', $jqueryVersion ,'/jquery.min.js')}">&#160;</script>
+        <script type="text/javascript" src="{concat($scheme, 'ajax.googleapis.com/ajax/libs/jquery/', $jqueryVersion ,'/jquery.min.js')}">&#160;</script>
 
         <xsl:variable name="localJQuerySrc">
                 <xsl:value-of select="/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='contextPath'][not(@qualifier)]"/>
@@ -724,6 +787,67 @@
                    })();
            </xsl:text></script>
         </xsl:if>
+
+        <!-- Add a contextpath to a JS variable -->
+                <script type="text/javascript"><xsl:text>
+                         if(typeof window.orcid === 'undefined'){
+                            window.orcid={};
+                          };
+                        window.orcid.contextPath= '</xsl:text><xsl:value-of select="/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='contextPath'][not(@qualifier)]"/><xsl:text>';</xsl:text>
+                    <xsl:text>window.orcid.themePath= '</xsl:text><xsl:value-of select="$theme-path"/><xsl:text>';</xsl:text>
+                </script>
+
+    </xsl:template>
+    
+    <!-- Display language selection if more than 1 language is supported (overides buggy dir2xhtml-alt). 
+    Uses a page metadata curRequestURI which was introduced by in /xmlui/src/main/webapp/themes/Mirage/sitemap.xmap-->
+    <xsl:template name="languageSelection">
+        <xsl:variable name="curRequestURI">
+            <xsl:value-of select="substring-after(/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='curRequestURI'],/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='request'][@qualifier='URI'])"/>
+        </xsl:variable>
+        <xsl:if test="count(/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='page'][@qualifier='supportedLocale']) &gt; 1">
+            <div id="ds-language-selection">
+                <xsl:for-each select="/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='page'][@qualifier='supportedLocale']">
+                    <xsl:variable name="locale" select="."/>
+                    <a>
+                        <xsl:attribute name="href">
+                            <xsl:value-of select="$curRequestURI"/>
+                            <xsl:call-template name="getLanguageURL"/>
+                            <xsl:value-of select="$locale"/>
+                        </xsl:attribute>
+                        <xsl:value-of select="/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='supportedLocale'][@qualifier=$locale]"/>
+                    </a>
+                </xsl:for-each>
+            </div>
+        </xsl:if>
+    </xsl:template>
+    <!-- Builds the Query String part of the language URL. If there allready is an excisting query string 
+    like: ?filtertype=subject&filter_relational_operator=equals&filter=keyword1 it appends the locale parameter with the ampersand (&) symbol -->
+    <xsl:template name="getLanguageURL">
+        <xsl:variable name="queryString" select="/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='request'][@qualifier='queryString']"/>
+        <xsl:choose>
+            <!-- There allready is a query string so append it and the language argument -->
+            <xsl:when test="$queryString != ''">
+                <xsl:text>?</xsl:text>
+                <xsl:choose>
+                    <xsl:when test="contains($queryString, '&amp;locale-attribute')">
+                        <xsl:value-of select="substring-before($queryString, '&amp;locale-attribute')"/>
+                        <xsl:text>&amp;locale-attribute=</xsl:text>
+                    </xsl:when>
+                    <!-- the query string is only the locale-attribute so remove it to append the correct one -->
+                    <xsl:when test="starts-with($queryString, 'locale-attribute')">
+                        <xsl:text>locale-attribute=</xsl:text>
+                    </xsl:when>
+                    <xsl:otherwise>
+                        <xsl:value-of select="$queryString"/>
+                        <xsl:text>&amp;locale-attribute=</xsl:text>
+                    </xsl:otherwise>
+                </xsl:choose>
+            </xsl:when>
+            <xsl:otherwise>
+                <xsl:text>?locale-attribute=</xsl:text>
+            </xsl:otherwise>
+        </xsl:choose>
     </xsl:template>
 
 </xsl:stylesheet>

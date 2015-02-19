@@ -14,6 +14,7 @@ import javax.servlet.ServletException;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
 import org.dspace.app.webui.util.UIUtil;
 import org.dspace.authorize.AuthorizeException;
@@ -25,11 +26,13 @@ import org.dspace.browse.BrowseInfo;
 import org.dspace.browse.BrowserScope;
 import org.dspace.sort.SortOption;
 import org.dspace.sort.SortException;
+import org.dspace.utils.DSpace;
 import org.dspace.content.Collection;
 import org.dspace.content.Community;
 import org.dspace.core.ConfigurationManager;
 import org.dspace.core.Context;
 import org.dspace.core.LogManager;
+import org.dspace.discovery.configuration.TagCloudConfiguration;
 
 /**
  * Servlet for browsing through indices, as they are defined in
@@ -108,12 +111,14 @@ public abstract class AbstractBrowserServlet extends DSpaceServlet
 
             // process the input, performing some inline validation
             BrowseIndex bi = null;
-            if (type != null && !"".equals(type))
+            if (StringUtils.isNotEmpty(type))
             {
                 bi = BrowseIndex.getBrowseIndex(type);
             }
 
-            if (bi == null)
+            // don't override a requested index, if no index is set,
+            // try to find it on a possibly specified sort option.
+            if (type == null && bi == null)
             {
                 if (sortBy > 0)
                 {
@@ -165,8 +170,8 @@ public abstract class AbstractBrowserServlet extends DSpaceServlet
                 offset = 0;
             }
 
-            // if no resultsperpage set, default to 20
-            if (resultsperpage < 0)
+            // if no resultsperpage set, default to 20 - if tag cloud enabled, leave it as is!
+            if (bi != null && resultsperpage < 0 && !bi.isTagCloudEnabled())
             {
                 resultsperpage = 20;
             }
@@ -325,6 +330,14 @@ public abstract class AbstractBrowserServlet extends DSpaceServlet
             {
                 if (bi.isMetadataIndex() && !scope.isSecondLevel())
                 {
+                	if (bi.isTagCloudEnabled()){
+                		TagCloudConfiguration tagCloudConfiguration = new DSpace().getServiceManager().getServiceByName("browseTagCloudConfiguration", TagCloudConfiguration.class);
+                		if (tagCloudConfiguration == null){
+                			tagCloudConfiguration = new TagCloudConfiguration();
+                		}
+                		request.setAttribute("tagCloudConfig", tagCloudConfiguration);
+                	}
+                	
                     showSinglePage(context, request, response);
                 }
                 else

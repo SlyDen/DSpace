@@ -7,7 +7,9 @@
  */
 package org.dspace.app.statistics;
 
+import org.dspace.content.MetadataSchema;
 import org.dspace.core.ConfigurationManager;
+import org.dspace.core.Constants;
 import org.dspace.core.Context;
 import org.dspace.core.LogManager;
 import org.dspace.storage.rdbms.DatabaseManager;
@@ -18,17 +20,9 @@ import java.sql.SQLException;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 
-import java.util.ArrayList;
-import java.util.Calendar;
-import java.util.Date;
-import java.util.GregorianCalendar;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.StringTokenizer;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -161,10 +155,10 @@ public class LogAnalyser
    private static Pattern logRegex = null;
    
    /** pattern to match commented out lines from the config file */
-   private static Pattern comment = Pattern.compile("^#");
+   private static final Pattern comment = Pattern.compile("^#");
         
    /** pattern to match genuine lines from the config file */
-   private static Pattern real = Pattern.compile("^(.+)=(.+)");
+   private static final Pattern real = Pattern.compile("^(.+)=(.+)");
    
    /** pattern to match all search types */
    private static Pattern typeRX = null;
@@ -1031,7 +1025,8 @@ public class LogAnalyser
     public static String unParseDate(Date date)
     {
         // Use SimpleDateFormat
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyy'-'MM'-'dd");
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy'-'MM'-'dd'T'hh:mm:ss'Z'");
+	    sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
         return sdf.format(date);
     }
     
@@ -1149,11 +1144,7 @@ public class LogAnalyser
     public static Integer getNumItems(Context context, String type)
         throws SQLException
     {
-        boolean oracle = false;
-        if ("oracle".equals(ConfigurationManager.getProperty("db.name")))
-        {
-            oracle = true;
-        }
+        boolean oracle = DatabaseManager.isOracle();
 
         // FIXME: this method is clearly not optimised
         
@@ -1166,33 +1157,41 @@ public class LogAnalyser
         
         if (type != null)
         {
-            typeQuery = "SELECT item_id " +
+            typeQuery = "SELECT resource_id " +
                         "FROM metadatavalue " +
-                        "WHERE text_value LIKE '%" + type + "%' " +
-                        "AND metadata_field_id = (" +
+                        "WHERE text_value LIKE '%" + type + "%' " + " AND resource_type_id="+ Constants.ITEM +
+                        " AND metadata_field_id = (" +
                         " SELECT metadata_field_id " +
                         " FROM metadatafieldregistry " +
-                        " WHERE element = 'type' " +
-                        " AND qualifier IS NULL) ";
+                        " WHERE metadata_schema_id = (" +
+                        "  SELECT metadata_schema_id" +
+                        "   FROM MetadataSchemaRegistry" +
+                        "   WHERE short_id = '" + MetadataSchema.DC_SCHEMA + "')" +
+                        "  AND element = 'type' " +
+                        "  AND qualifier IS NULL) ";
         }
         
         // start the date constraint query buffer
         StringBuffer dateQuery = new StringBuffer();
         if (oracle)
         {
-            dateQuery.append("SELECT /*+ ORDERED_PREDICATES */ item_id ");
+            dateQuery.append("SELECT /*+ ORDERED_PREDICATES */ resource_id ");
         }
         else
         {
-            dateQuery.append("SELECT item_id ");
+            dateQuery.append("SELECT resource_id ");
         }
 
         dateQuery.append("FROM metadatavalue " +
-                          "WHERE metadata_field_id = (" +
+                          "WHERE " + "resource_type_id="+ Constants.ITEM +  " AND metadata_field_id = (" +
                           " SELECT metadata_field_id " +
                           " FROM metadatafieldregistry " +
-                          " WHERE element = 'date' " +
-                          " AND qualifier = 'accessioned') ");
+                          " WHERE metadata_schema_id = (" +
+                          "  SELECT metadata_schema_id" +
+                          "   FROM MetadataSchemaRegistry" +
+                          "   WHERE short_id = '" + MetadataSchema.DC_SCHEMA + "')" +
+                          "  AND element = 'date' " +
+                          "  AND qualifier = 'accessioned') ");
 
         // Verifies that the metadata contains a valid date, otherwise the
         // postgres queries blow up when doing the ::timestamp cast.
@@ -1205,28 +1204,33 @@ public class LogAnalyser
             if (oracle)
             {
                 dateQuery.append(" AND TO_TIMESTAMP( TO_CHAR(text_value), "+
-                        "'yyyy-mm-dd\"T\"hh24:mi:ss\"Z\"' ) > TO_DATE('" +
-                        unParseDate(startDate) + "', 'yyyy-MM-dd') ");
+                        "'yyyy-mm-dd\"T\"hh24:mi:ss\"Z\"' ) >= TO_DATE('" +
+                        unParseDate(startDate) + "', 'yyyy-MM-dd\"T\"hh24:mi:ss\"Z\"') ");
             }
             else
             {
-                dateQuery.append(" AND text_value::timestamp > '" +
+                dateQuery.append(" AND text_value::timestamp >= '" +
                         unParseDate(startDate) + "'::timestamp ");
             }
         }
 
         if (endDate != null)
         {
+            // adjust end date to account for timestamp comparison
+            GregorianCalendar realEndDate = new GregorianCalendar();
+            realEndDate.setTime(endDate);
+            realEndDate.add(Calendar.DAY_OF_MONTH, 1);
+            Date queryEndDate = realEndDate.getTime();
             if (oracle)
             {
                 dateQuery.append(" AND TO_TIMESTAMP( TO_CHAR(text_value), "+
                         "'yyyy-mm-dd\"T\"hh24:mi:ss\"Z\"' ) < TO_DATE('" +
-                        unParseDate(endDate) + "', 'yyyy-MM-dd') ");
+                        unParseDate(queryEndDate) + "', 'yyyy-MM-dd\"T\"hh24:mi:ss\"Z\"') ");
             }
             else
             {
                 dateQuery.append(" AND text_value::timestamp < '" +
-                        unParseDate(endDate) + "'::timestamp ");
+                        unParseDate(queryEndDate) + "'::timestamp ");
             }
         }
         

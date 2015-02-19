@@ -36,8 +36,13 @@
 			</c:choose>
 			
 			<c:forEach var="r" items="${result}">			
+<<<<<<< HEAD
 				<div class="${r[1].romeocolour}RomeoPublisher">
 				<div class="header">
+=======
+				<div class="${r[1].romeocolour}RomeoPublisher row">
+				<div class="header container">
+>>>>>>> 2eaaf84810b3a3de0907e3e37ab695b053cc381f
 					<fmt:message key="jsp.sherpa.jornaltitle">
 						<fmt:param value="${r[0].title}" />
 					</fmt:message>
@@ -61,7 +66,11 @@
 						</c:otherwise>
 					</c:choose>
 				</div>
+<<<<<<< HEAD
 				<div class="policy">
+=======
+				<div class="policy container">
+>>>>>>> 2eaaf84810b3a3de0907e3e37ab695b053cc381f
 					<c:choose>
 						<c:when test="${empty r[1]}">
 							<fmt:message key="jsp.sherpa.publisher.nodata" />
@@ -128,8 +137,12 @@
 					</c:choose>
 				</div>
 				<fmt:message key="jsp.sherpa.legend" />
+<<<<<<< HEAD
 				</div><br/>
 			
+=======
+				</div>
+>>>>>>> 2eaaf84810b3a3de0907e3e37ab695b053cc381f
 			</c:forEach>
 		</c:otherwise>
 	</c:choose>

@@ -10,7 +10,7 @@ package org.dspace.sword2;
 import org.apache.abdera.i18n.iri.IRI;
 import org.dspace.content.Bitstream;
 import org.dspace.content.Bundle;
-import org.dspace.content.DCValue;
+import org.dspace.content.Metadatum;
 import org.dspace.content.Item;
 import org.dspace.core.ConfigurationManager;
 import org.dspace.core.Context;
@@ -50,6 +50,15 @@ public class ReceiptGenerator
 		return receipt;
 	}
 
+    protected DepositReceipt createMediaResourceReceipt(Context context, Item item, SwordConfigurationDSpace config)
+            throws DSpaceSwordException, SwordError, SwordServerException
+    {
+        SwordUrlManager urlManager = config.getUrlManager(context, config);
+        DepositReceipt receipt = new DepositReceipt();
+        receipt.setLocation(urlManager.getContentUrl(item));
+        return receipt;
+    }
+
 	protected DepositReceipt createReceipt(Context context, DepositResult result, SwordConfigurationDSpace config)
 			throws DSpaceSwordException, SwordError, SwordServerException
 	{
@@ -61,7 +70,7 @@ public class ReceiptGenerator
 	 *
 	 * @throws DSpaceSwordException
 	 */
-	protected DepositReceipt createReceipt(Context context, DepositResult result, SwordConfigurationDSpace config, boolean mediaResource)
+	protected DepositReceipt createReceipt(Context context, DepositResult result, SwordConfigurationDSpace config, boolean mediaResourceLocation)
 			throws DSpaceSwordException, SwordError, SwordServerException
 	{
 		SwordUrlManager urlManager = config.getUrlManager(context, config);
@@ -78,7 +87,7 @@ public class ReceiptGenerator
         receipt.setMediaFeedIRI(urlManager.getMediaFeedUrl(result.getItem()));
         receipt.setLastModified(result.getItem().getLastModified());
 
-		if (mediaResource)
+		if (mediaResourceLocation)
 		{
 			receipt.setLocation(urlManager.getContentUrl(result.getItem()));
 		}
@@ -206,11 +215,6 @@ public class ReceiptGenerator
 		return receipt;
 	}
 
-	private void addMetadata(DepositResult result, DepositReceipt receipt)
-	{
-
-	}
-
 	/**
 	 * Add all the subject classifications from the bibliographic
 	 * metadata.
@@ -218,7 +222,7 @@ public class ReceiptGenerator
 	 */
 	protected void addCategories(DepositResult result, DepositReceipt receipt)
 	{
-		DCValue[] dcv = result.getItem().getMetadata("dc.subject.*");
+		Metadatum[] dcv = result.getItem().getMetadataByMetadataString("dc.subject.*");
 		if (dcv != null)
 		{
 			for (int i = 0; i < dcv.length; i++)
@@ -230,7 +234,7 @@ public class ReceiptGenerator
 
 	protected void addCategories(Item item, DepositReceipt receipt)
 	{
-		DCValue[] dcv = item.getMetadata("dc.subject.*");
+		Metadatum[] dcv = item.getMetadataByMetadataString("dc.subject.*");
 		if (dcv != null)
 		{
 			for (int i = 0; i < dcv.length; i++)
@@ -246,7 +250,7 @@ public class ReceiptGenerator
 	 */
 	protected void addPublishDate(DepositResult result, DepositReceipt receipt)
 	{
-		DCValue[] dcv = result.getItem().getMetadata("dc.date.issued");
+		Metadatum[] dcv = result.getItem().getMetadataByMetadataString("dc.date.issued");
 		if (dcv != null && dcv.length == 1)
         {
             try
@@ -265,7 +269,7 @@ public class ReceiptGenerator
 
 	protected void addPublishDate(Item item, DepositReceipt receipt)
 	{
-		DCValue[] dcv = item.getMetadata("dc.date.issued");
+		Metadatum[] dcv = item.getMetadataByMetadataString("dc.date.issued");
 		if (dcv != null && dcv.length == 1)
         {
             try
@@ -289,7 +293,7 @@ public class ReceiptGenerator
 	protected void addLastUpdatedDate(DepositResult result, DepositReceipt receipt)
 	{
 		String config = ConfigurationManager.getProperty("swordv2-server", "updated.field");
-		DCValue[] dcv = result.getItem().getMetadata(config);
+		Metadatum[] dcv = result.getItem().getMetadataByMetadataString(config);
 		if (dcv != null && dcv.length == 1)
         {
             try
@@ -309,7 +313,7 @@ public class ReceiptGenerator
 	protected void addLastUpdatedDate(Item item, DepositReceipt receipt)
 	{
 		String config = ConfigurationManager.getProperty("swordv2-server", "updated.field");
-		DCValue[] dcv = item.getMetadata(config);
+		Metadatum[] dcv = item.getMetadataByMetadataString(config);
 		if (dcv != null && dcv.length == 1)
         {
             try

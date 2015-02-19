@@ -7,67 +7,36 @@
  */
 package org.dspace.search;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.PrintWriter;
-import java.io.Reader;
-import java.io.StringWriter;
-import java.lang.reflect.Constructor;
-import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.Calendar;
-import java.util.HashMap;
-import java.util.Locale;
-import java.util.Map;
-import java.util.TimeZone;
-import java.text.SimpleDateFormat;
-import java.text.ParseException;
-
-import java.util.List;
-import org.apache.commons.cli.CommandLine;
-import org.apache.commons.cli.HelpFormatter;
-import org.apache.commons.cli.OptionBuilder;
-import org.apache.commons.cli.Options;
-import org.apache.commons.cli.PosixParser;
+import org.apache.commons.cli.*;
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
 import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.miscellaneous.LimitTokenCountAnalyzer;
+import org.apache.lucene.document.DateTools;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
-import org.apache.lucene.document.DateTools;
-import org.apache.lucene.index.IndexReader;
-import org.apache.lucene.index.IndexWriter;
-import org.apache.lucene.index.IndexWriterConfig;
-import org.apache.lucene.index.Term;
-import org.apache.lucene.index.TermDocs;
+import org.apache.lucene.index.*;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
+import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.Version;
-import org.dspace.content.Bitstream;
-import org.dspace.content.Bundle;
-import org.dspace.content.Collection;
-import org.dspace.content.Community;
-import org.dspace.content.DCValue;
-import org.dspace.content.DSpaceObject;
-import org.dspace.content.Item;
-import org.dspace.content.ItemIterator;
-import org.dspace.content.authority.ChoiceAuthorityManager;
-import org.dspace.content.authority.MetadataAuthorityManager;
-import org.dspace.core.ConfigurationManager;
-import org.dspace.core.Constants;
-import org.dspace.core.Context;
-import org.dspace.core.Email;
-import org.dspace.core.I18nUtil;
-import org.dspace.core.LogManager;
-import org.dspace.handle.HandleManager;
-import org.dspace.sort.SortOption;
-import org.dspace.sort.OrderFormat;
-
 import org.dspace.app.util.DCInputsReaderException;
 import org.dspace.app.util.Util;
+import org.dspace.content.*;
+import org.dspace.content.Collection;
+import org.dspace.content.authority.ChoiceAuthorityManager;
+import org.dspace.content.authority.MetadataAuthorityManager;
+import org.dspace.core.*;
+import org.dspace.handle.HandleManager;
+import org.dspace.sort.OrderFormat;
+import org.dspace.sort.SortOption;
+
+import java.io.*;
+import java.lang.reflect.Constructor;
+import java.sql.SQLException;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.*;
 
 /**
  * DSIndexer contains the methods that index Items and their metadata,
@@ -88,7 +57,15 @@ import org.dspace.app.util.Util;
  *
  * @author Mark Diggory
  * @author Graham Triggs
+ * 
+ * @deprecated Since DSpace 4 the system use an abstraction layer named
+ *             Discovery to provide access to different search providers. The
+ *             legacy system built upon Apache Lucene is likely to be removed in
+ *             a future version. If you are interested in using Lucene as backend
+ *             for the DSpace search system, please consider to build a Lucene
+ *             implementation of the Discovery interfaces
  */
+@Deprecated
 public class DSIndexer
 {
     private static final Logger log = Logger.getLogger(DSIndexer.class);
@@ -103,7 +80,7 @@ public class DSIndexer
 
     private static int batchFlushAfterDocuments = ConfigurationManager.getIntProperty("search.batch.documents", 20);
     private static boolean batchProcessingMode = false;
-    static final Version luceneVersion = Version.LUCENE_35;
+    static final Version luceneVersion = Version.LATEST;
 
     // Class to hold the index configuration (one instance per config line)
     private static class IndexConfig
@@ -219,7 +196,7 @@ public class DSIndexer
          */
         try
         {
-            if (!IndexReader.indexExists(FSDirectory.open(new File(indexDirectory))))
+            if (!DirectoryReader.indexExists(FSDirectory.open(new File(indexDirectory))))
             {
 
                 if (!new File(indexDirectory).mkdirs())
@@ -387,7 +364,11 @@ public class DSIndexer
         try
         {
             flushIndexingTaskQueue(writer);
-            writer.optimize();
+            //With lucene 4.0 this method has been deleted , as it is horribly inefficient and very
+            //rarely justified. Lucene's multi-segment search performance has improved
+            //over time, and the default TieredMergePolicy now targets segments with
+            //deletions. For more info see http://blog.trifork.com/2011/11/21/simon-says-optimize-is-bad-for-you/
+            //writer.optimize();
         }
         finally
         {
@@ -580,12 +561,18 @@ public class DSIndexer
     public static void cleanIndex(Context context) throws IOException, SQLException {
 
     	IndexReader reader = DSQuery.getIndexReader();
-
+    	
+    	Bits liveDocs = MultiFields.getLiveDocs(reader);
+    	  
     	for(int i = 0 ; i < reader.numDocs(); i++)
     	{
-    		if(!reader.isDeleted(i))
-    		{
-    			Document doc = reader.document(i);
+    	    if (!liveDocs.get(i))
+    		{         
+    	        // document is deleted...
+    	        log.debug("Encountered deleted doc: " + i);
+    		}
+    	    else {
+                Document doc = reader.document(i);
         		String handle = doc.get("handle");
                 if (!StringUtils.isEmpty(handle))
                 {
@@ -603,11 +590,7 @@ public class DSIndexer
                         log.debug("Keeping: " + handle);
                     }
                 }
-    		}
-    		else
-    		{
-    			log.debug("Encountered deleted doc: " + i);
-    		}
+    		}    		
     	}
 	}
 
@@ -888,23 +871,27 @@ public class DSIndexer
 		boolean inIndex = false;
 
 		IndexReader ir = DSQuery.getIndexReader();
+		Bits liveDocs = MultiFields.getLiveDocs(ir);
+		DocsEnum docs = MultiFields.getTermDocsEnum(ir, liveDocs, t.field(), t.bytes());
 
-		TermDocs docs = ir.termDocs(t);
+		int id;
+        if (docs != null)
+        {
+            while ((id = docs.nextDoc()) != DocsEnum.NO_MORE_DOCS)
+            {
+                inIndex = true;
+                Document doc = ir.document(id);
 
-		while(docs.next())
-		{
-			inIndex = true;
-			int id = docs.doc();
-			Document doc = ir.document(id);
+                IndexableField lastIndexed = doc.getField(LAST_INDEXED_FIELD);
 
-			Field lastIndexed = doc.getField(LAST_INDEXED_FIELD);
-
-			if (lastIndexed == null || Long.parseLong(lastIndexed.stringValue()) <
-					lastModified.getTime()) {
-				reindexItem = true;
-			}
-		}
-
+                if (lastIndexed == null
+                        || Long.parseLong(lastIndexed.stringValue()) < lastModified
+                                .getTime())
+                {
+                    reindexItem = true;
+                }
+            }
+        }
 		return reindexItem || !inIndex;
 	}
 
@@ -915,7 +902,20 @@ public class DSIndexer
             throws IOException
     {
         Directory dir = FSDirectory.open(new File(indexDirectory));
-        IndexWriterConfig iwc = new IndexWriterConfig(luceneVersion, getAnalyzer());
+        
+        LimitTokenCountAnalyzer decoratorAnalyzer = null; 
+        /* Set maximum number of terms to index if present in dspace.cfg */
+        if (maxfieldlength == -1)
+        {
+            decoratorAnalyzer = new LimitTokenCountAnalyzer(getAnalyzer(), Integer.MAX_VALUE);
+        }
+        else
+        {
+            decoratorAnalyzer = new LimitTokenCountAnalyzer(getAnalyzer(), maxfieldlength);
+        }
+
+        
+        IndexWriterConfig iwc = new IndexWriterConfig(luceneVersion, decoratorAnalyzer);
         if(wipeExisting){
             iwc.setOpenMode(IndexWriterConfig.OpenMode.CREATE);
         }else{
@@ -923,16 +923,6 @@ public class DSIndexer
         }
 
         IndexWriter writer = new IndexWriter(dir, iwc);
-
-        /* Set maximum number of terms to index if present in dspace.cfg */
-        if (maxfieldlength == -1)
-        {
-            writer.setMaxFieldLength(Integer.MAX_VALUE);
-        }
-        else
-        {
-            writer.setMaxFieldLength(maxfieldlength);
-        }
 
         return writer;
     }
@@ -1055,7 +1045,7 @@ public class DSIndexer
         int j;
         if (indexConfigArr.length > 0)
         {
-            DCValue[] mydc;
+            Metadatum[] mydc;
 
             for (int i = 0; i < indexConfigArr.length; i++)
             {
@@ -1221,7 +1211,7 @@ public class DSIndexer
             for (SortOption so : SortOption.getSortOptions())
             {
                 String[] somd = so.getMdBits();
-                DCValue[] dcv = item.getMetadata(somd[0], somd[1], somd[2], Item.ANY);
+                Metadatum[] dcv = item.getMetadata(somd[0], somd[1], somd[2], Item.ANY);
                 if (dcv.length > 0)
                 {
                     String value = OrderFormat.makeSortString(dcv[0].value, dcv[0].language, so.getType());

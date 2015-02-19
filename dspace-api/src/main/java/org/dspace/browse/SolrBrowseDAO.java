@@ -31,7 +31,8 @@ import org.dspace.utils.DSpace;
 /**
  * 
  * @author Andrea Bollini (CILEA)
- *
+ * @author Adán Román Ruiz at arvo.es (bugfix)
+ * 
  */
 public class SolrBrowseDAO implements BrowseDAO
 {
@@ -133,7 +134,7 @@ public class SolrBrowseDAO implements BrowseDAO
     private DiscoverResult sResponse = null;
 
     private boolean itemsWithdrawn = false;
-    private boolean itemsPrivate = false;
+    private boolean itemsDiscoverable = true;
 
     private boolean showFrequencies;
     
@@ -155,7 +156,7 @@ public class SolrBrowseDAO implements BrowseDAO
             }
             else
             {
-                query.setMaxResults(limit > 0 ? limit : 20);
+                query.setMaxResults(limit/* > 0 ? limit : 20*/);
                 if (offset > 0)
                 {
                     query.setStart(offset);
@@ -186,7 +187,8 @@ public class SolrBrowseDAO implements BrowseDAO
             }
             try
             {
-                sResponse = searcher.search(context, query, itemsWithdrawn);
+				sResponse = searcher.search(context, query, itemsWithdrawn
+						|| !itemsDiscoverable);
             }
             catch (SearchServiceException e)
             {
@@ -201,18 +203,10 @@ public class SolrBrowseDAO implements BrowseDAO
         if (itemsWithdrawn)
         {
             query.addFilterQueries("withdrawn:true");
-            if (itemsPrivate)
-            {
-                query.addFilterQueries("discoverable:false");    
-            }
-            else
-            {
-                query.addFilterQueries("NOT(discoverable:false)");    
-            }
         }
-        else
+        else if (!itemsDiscoverable)
         {
-            query.addFilterQueries("NOT(withdrawn:true)");
+            query.addFilterQueries("discoverable:false");    
         }
     }
 
@@ -260,7 +254,7 @@ public class SolrBrowseDAO implements BrowseDAO
         List<FacetResult> facet = resp.getFacetResult(facetField);
         int count = doCountQuery();
         int start = offset > 0 ? offset : 0;
-        int max = limit > 0 ? limit : 20;
+        int max = limit > 0 ? limit : count; //if negative, return everything
         List<String[]> result = new ArrayList<String[]>();
         if (ascending)
         {
@@ -301,7 +295,7 @@ public class SolrBrowseDAO implements BrowseDAO
             // processing the query...
             Item item = (Item) solrDoc;
             BrowseItem bitem = new BrowseItem(context, item.getID(),
-                    item.isArchived(), item.isWithdrawn());
+                    item.isArchived(), item.isWithdrawn(), item.isDiscoverable());
             bitems.add(bitem);
         }
         return bitems;
@@ -344,16 +338,17 @@ public class SolrBrowseDAO implements BrowseDAO
         query.addFilterQueries("search.resourcetype:" + Constants.ITEM);
         if (isAscending)
         {
-            query.setQuery("bi_"+column + "_sort" + ": [* TO \"" + value + "\"]");
+            query.setQuery("bi_"+column + "_sort" + ": [* TO \"" + value + "\"}");
         }
         else
         {
-            query.setQuery("bi_" + column + "_sort" + ": [\"" + value + "\" TO *]");
+            query.setQuery("bi_" + column + "_sort" + ": {\"" + value + "\" TO *]");
         }
+	    boolean includeUnDiscoverable = itemsWithdrawn || !itemsDiscoverable;
         DiscoverResult resp = null;
         try
         {
-            resp = searcher.search(context, query);
+            resp = searcher.search(context, query, includeUnDiscoverable);
         }
         catch (SearchServiceException e)
         {
@@ -681,13 +676,10 @@ public class SolrBrowseDAO implements BrowseDAO
         if (table.equals(BrowseIndex.getWithdrawnBrowseIndex().getTableName()))
         {
             itemsWithdrawn = true;
-            itemsPrivate = false;
         }
         else if (table.equals(BrowseIndex.getPrivateBrowseIndex().getTableName()))
         {
-            itemsPrivate = true;
-            // items private are also withdrawn
-            itemsWithdrawn = true;
+            itemsDiscoverable = false;
         }
         facetField = table;
     }
